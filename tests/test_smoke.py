@@ -8,6 +8,7 @@ from unittest.mock import patch
 import httpx
 import mlflow
 from mlflow.deployments import get_deploy_client
+
 from mlflow_triton_control import TritonControlDeploymentClient, triton
 
 

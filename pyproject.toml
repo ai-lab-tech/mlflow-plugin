@@ -17,3 +17,10 @@ triton-control = "mlflow_triton_control.deployment_client"
 
 [tool.setuptools.packages.find]
 include = ["mlflow_triton_control*"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
