@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
+import mlflow
 from mlflow.artifacts import download_artifacts
 from mlflow.exceptions import MlflowException
 from mlflow.models import Model
@@ -56,6 +59,46 @@ def save_model(triton_model_path, path, mlflow_model=None):
     model = mlflow_model or Model()
     model.add_flavor(FLAVOR_NAME, data=data_path, model_name=source.name)
     model.save(str(destination / "MLmodel"))
+
+
+def log_training_artifacts(
+    training_code_path,
+    *,
+    artifact_path="training-artifacts",
+):
+    """Log training source and installed packages to the active MLflow run.
+
+    The source directory is uploaded recursively under ``<artifact_path>/code``.
+    Keep datasets outside this directory. ``requirements.txt`` is captured with
+    ``pip freeze`` using the current Python interpreter and logged directly under
+    ``artifact_path``. It describes the training environment, not a minimized
+    serving environment. The source directory is not modified.
+
+    Returns the run-relative artifact paths for code and requirements.
+    """
+    source = Path(training_code_path).expanduser().resolve()
+    if not source.is_dir():
+        raise ValueError(f"Training code directory does not exist: {source}")
+    if mlflow.active_run() is None:
+        raise RuntimeError("log_training_artifacts() requires an active MLflow run")
+
+    requirements = subprocess.run(
+        [sys.executable, "-m", "pip", "freeze"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+    mlflow.log_artifacts(str(source), artifact_path=f"{artifact_path}/code")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        requirements_file = Path(temp_dir) / "requirements.txt"
+        requirements_file.write_text(requirements, encoding="utf-8")
+        mlflow.log_artifact(str(requirements_file), artifact_path=artifact_path)
+
+    return {
+        "code": f"{artifact_path}/code/",
+        "requirements": f"{artifact_path}/requirements.txt",
+    }
 
 
 def log_model(

@@ -66,6 +66,32 @@ For another namespace, use `triton-control://<service>.<namespace>.svc.cluster.l
 for example `triton-control://triton-control.blabla.svc.cluster.local:8000`.
 Use the actual Service name created by your Helm release.
 
+## Log training artifacts
+
+Capture the training source and installed Python packages in an active MLflow
+run, before a Triton repository exists:
+
+```python
+import mlflow
+from mlflow_triton_control import triton
+
+with mlflow.start_run():
+    artifacts = triton.log_training_artifacts(training_code_path="/workspace/source")
+    # Start training here.
+```
+
+The plugin runs `pip freeze` with the current Python interpreter automatically.
+It logs the source directory recursively under `training-artifacts/code/` and the
+captured environment under `training-artifacts/requirements.txt`. Keep training
+data outside the source directory. The source directory is not modified.
+These requirements describe the installed training environment; they are not
+minimized for serving.
+
+Use `artifact_path` to change the default `training-artifacts` location. The return
+value contains run-relative paths under `code` and `requirements`. No Triton
+repository or Model Registry entry is created by this function. Once a repository
+has been generated, use `triton.log_model()` to log it.
+
 ## Log a Triton model in MLflow
 
 Like NVIDIA's Triton MLflow plugin, this package provides a `triton` model
