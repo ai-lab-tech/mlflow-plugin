@@ -22,11 +22,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mlflow: ["3.14.0"]
+        mlflow: ["chart"]
         include:
-          - mlflow: ${{ inputs.mlflow_version || '3.14.0' }}
+          - mlflow: ${{ inputs.mlflow_version || 'chart' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Check out Triton Control chart
+        if: matrix.mlflow == 'chart'
+        uses: actions/checkout@v4
+        with:
+          repository: ai-lab-tech/triton-control
+          ref: main
+          path: .triton-control
+          sparse-checkout: charts/triton-control
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -34,8 +43,12 @@ jobs:
         env:
           MLFLOW_VERSION: ${{ matrix.mlflow }}
         run: |
-          python -m pip install build ruff
+          python -m pip install build ruff pyyaml
           python -m build
+          if [ "$MLFLOW_VERSION" = chart ]; then
+            MLFLOW_VERSION=$(python -c 'import yaml; print(yaml.safe_load(open(".triton-control/charts/triton-control/values.yaml"))["mlflow"]["version"])')
+            echo "Testing MLflow version from triton-control/main: $MLFLOW_VERSION"
+          fi
           if [ "$MLFLOW_VERSION" = latest ]; then
             python -m pip install --upgrade dist/*.whl "mlflow>=3.14,<4"
           else

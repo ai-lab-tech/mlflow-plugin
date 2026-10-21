@@ -6,7 +6,9 @@ CLI or Python API. Triton Control creates the Kubernetes deployment and resolves
 the selected user-owned S3 profile.
 
 Requires Python 3.10+ and MLflow `>=3.14,<4`. Automatic CI tests the version
-pinned in the Triton Control chart (currently `3.14.0`).
+pinned in [`charts/triton-control/values.yaml`](https://github.com/ai-lab-tech/triton-control/blob/main/charts/triton-control/values.yaml)
+on `triton-control/main`. CI reads that version on every run, including the
+weekly scheduled run. Manual runs can test an additional MLflow version.
 
 ```bash
 python -m build
