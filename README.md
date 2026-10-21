@@ -19,6 +19,7 @@ mlflow deployments help -t triton-control
 From this directory, run the tests after installing the wheel:
 
 ```bash
+python -m pip install hypothesis-jsonschema jsonschema
 python -m pip check
 python -m unittest discover -s tests -v
 ```
@@ -144,3 +145,31 @@ python -m twine upload dist/mlflow-triton-control-0.3.0/*
 
 When prompted, enter `__token__` as the username and a PyPI API token scoped to
 `mlflow-triton-control` as the password.
+
+## Contract tests
+
+CI checks out `triton-control/main` and exports the deployment router's OpenAPI
+contract without starting the server or its lifespan. Backend dependencies are
+installed in a separate environment. Plugin HTTP requests are validated against
+those routes and request schemas; POST and DELETE mock responses are generated
+from their current response schemas using hypothesis-jsonschema.
+
+The GET endpoints currently declare free-form dictionaries, so OpenAPI cannot
+describe their fields. For those responses the exporter calls the upstream
+`describe` serializer with a synthetic model record and simulated Triton
+readiness. The response fields and readiness values come from backend code,
+not a duplicated response dictionary in this repository.
+
+To run locally, install the backend dependencies in a separate virtual environment,
+then export and run (replace the backend Python and checkout paths):
+
+```bash
+DATABASE_URL=sqlite:// PYTHONPATH=../triton-control/triton-backend \
+  /path/to/backend-venv/bin/python tests/export_contract.py /tmp/triton-contract.json
+python -m pip install hypothesis-jsonschema jsonschema
+TRITON_CONTROL_CONTRACT=/tmp/triton-contract.json python -m unittest discover -s tests -v
+```
+
+The contract test is skipped when `TRITON_CONTROL_CONTRACT` is unset. CI always
+sets it; missing or invalid exports fail the job. These tests exercise API shapes
+and plugin behavior, not backend authentication or real deployment execution.

@@ -24,7 +24,7 @@ trap 'rm -rf -- "$smoke_dir"' EXIT
 smoke_python="$smoke_dir/venv/bin/python"
 "$smoke_python" -m pip install --upgrade pip build
 "$smoke_python" -m build "$plugin_dir" --outdir "$smoke_dir/dist"
-"$smoke_python" -m pip install --upgrade "$smoke_dir"/dist/*.whl "$mlflow_requirement"
+"$smoke_python" -m pip install --upgrade "$smoke_dir"/dist/*.whl "$mlflow_requirement" hypothesis-jsonschema jsonschema
 "$smoke_python" -m pip check
 "$smoke_python" -c 'import mlflow; print("Testing MLflow", mlflow.__version__)'
 export MLFLOW_DISABLE_AGENT_HINT=1

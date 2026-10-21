@@ -27,23 +27,32 @@ jobs:
           - mlflow: ${{ inputs.mlflow_version || 'chart' }}
     steps:
       - uses: actions/checkout@v4
-      - name: Check out Triton Control chart
-        if: matrix.mlflow == 'chart'
+      - name: Check out Triton Control contract and chart
         uses: actions/checkout@v4
         with:
           repository: ai-lab-tech/triton-control
           ref: main
           path: .triton-control
-          sparse-checkout: charts/triton-control
+          sparse-checkout: |
+            charts/triton-control
+            triton-backend
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Export current Triton Control contract
+        env:
+          DATABASE_URL: sqlite://
+          PYTHONPATH: .triton-control/triton-backend
+        run: |
+          python -m venv /tmp/triton-contract-venv
+          /tmp/triton-contract-venv/bin/pip install ./.triton-control/triton-backend
+          /tmp/triton-contract-venv/bin/python tests/export_contract.py "$RUNNER_TEMP/triton-contract.json"
       - name: Build and install wheel
         env:
           MLFLOW_VERSION: ${{ matrix.mlflow }}
         run: |
-          python -m pip install build ruff pyyaml
+          python -m pip install build ruff pyyaml hypothesis-jsonschema jsonschema
           python -m build
           if [ "$MLFLOW_VERSION" = chart ]; then
             MLFLOW_VERSION=$(python -c 'import yaml; print(yaml.safe_load(open(".triton-control/charts/triton-control/values.yaml"))["mlflow"]["version"])')
@@ -59,6 +68,7 @@ jobs:
       - name: Smoke tests
         env:
           MLFLOW_DISABLE_AGENT_HINT: "1"
+          TRITON_CONTROL_CONTRACT: ${{ runner.temp }}/triton-contract.json
         run: |
           ruff check mlflow_triton_control tests
           ruff format --check mlflow_triton_control tests
