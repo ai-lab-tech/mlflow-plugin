@@ -1,0 +1,53 @@
+name: MLflow plugin CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      mlflow_version:
+        description: "Additional MLflow version to smoke test (e.g. 3.15.0)"
+        required: false
+        default: ""
+        type: string
+  schedule:
+    - cron: "0 6 * * 1"
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mlflow: ["3.14.0"]
+        include:
+          - mlflow: ${{ inputs.mlflow_version || '3.14.0' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build and install wheel
+        env:
+          MLFLOW_VERSION: ${{ matrix.mlflow }}
+        run: |
+          python -m pip install build ruff
+          python -m build
+          if [ "$MLFLOW_VERSION" = latest ]; then
+            python -m pip install --upgrade dist/*.whl "mlflow>=3.14,<4"
+          else
+            python -m pip install dist/*.whl "mlflow==$MLFLOW_VERSION"
+          fi
+          python -m pip check
+          python -c 'import mlflow; print("Testing MLflow", mlflow.__version__)'
+      - name: Smoke tests
+        env:
+          MLFLOW_DISABLE_AGENT_HINT: "1"
+        run: |
+          ruff check mlflow_triton_control tests
+          ruff format --check mlflow_triton_control tests
+          mlflow deployments help -t triton-control
+          python -m unittest discover -s tests -v
