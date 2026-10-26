@@ -27,12 +27,15 @@ Docker must be running. From any working directory:
 
 ```bash
 python3 /home/ghost/git/mlflow-plugin/examples/run_real_models.py \
-  --data-root /home/ghost/git/triton-model-generator/benchmarks/data \
-  --output /home/ghost/git/triton-model-generator/generated/mlflow-real-examples-serving
+  --data-root /home/ghost/git/triton-model-generator/benchmarks/data
 ```
 
 Use the script in this repository, not the old `/tmp/triton-control-log-model-wrapper`
-copy. The output directory must be new; previous results are preserved.
+copy. By default, each run creates a new timestamped directory under
+`/mnt/container-data/mlflow-tests/`, on the large data disk. Logs, MLflow artifacts,
+serving copies, fixtures and pip cache are stored there. The runner refuses this
+default if the disk is not mounted. `--output` can override the location; an explicit
+output directory must be new. Previous results and running tests are not moved.
 
 The launcher first prepares CPU Triton images with Python 3.11 and 3.14 and
 matching Python backend stubs. It reuses its existing image tags on later runs.
@@ -137,3 +140,22 @@ Local loader checks completed for all four PyTorch examples and for SVM/MLP.
 The current inspection environment has sklearn 1.9.1: mixed-column and boosting
 load/predict checks failed there, so matching the saved environment is required.
 Use the full runner above to measure updated packaging and actual serving results.
+
+## Retest selected cases
+
+`--case` is repeatable. For the four failures from the first serving run:
+
+```bash
+python3 /home/ghost/git/mlflow-plugin/examples/run_real_models.py \
+  --data-root /home/ghost/git/triton-model-generator/benchmarks/data \
+  --case sklearn_mixed_columns \
+  --case huggingface_classification \
+  --case huggingface_question_answering \
+  --case huggingface_generation
+```
+
+This creates a separate report on the data disk and leaves the eight passed cases
+and their original report untouched. It does not merge scores automatically.
+Packaging containers bind their `/tmp` (including Python environments and MLflow
+staging files) to `<output>/work/<family>`, with `TMPDIR=/tmp`. These work folders
+are retained with the run. Docker serving scratch uses Docker's data disk.

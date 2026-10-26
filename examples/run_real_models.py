@@ -8,6 +8,8 @@ import json
 import os
 import shutil
 import subprocess
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 from build_triton_runtime import build_image, dockerfile
@@ -68,7 +70,12 @@ def runtime_requirements(data, family):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-root", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path, help="New directory; never overwritten")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="New directory; default: /mnt/container-data/mlflow-tests/<timestamp>-<id>",
+    )
+    parser.add_argument("--case", action="append", choices=CASES, help="Run selected cases only; repeatable")
     parser.add_argument("--family", action="append", choices=GROUPS, help="Default: all three")
     parser.add_argument("--timeout", type=int, default=3600, help="Seconds per family including install")
     parser.add_argument(
@@ -86,9 +93,21 @@ def main():
         parser.error("Docker is required; install/start Docker and retry")
     subprocess.run(["docker", "info"], check=True, stdout=subprocess.DEVNULL)
     data = args.data_root.resolve(strict=True)
-    output = args.output.resolve()
+    if args.output is None:
+        storage = Path("/mnt/container-data")
+        if not storage.is_mount():
+            parser.error("/mnt/container-data is not mounted; refusing to write tests onto the system disk")
+        run_name = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
+        output = storage / "mlflow-tests" / run_name
+    else:
+        output = args.output.resolve()
     plugin = Path(__file__).resolve().parents[1]
-    families = list(dict.fromkeys(args.family or GROUPS))
+    requested = list(dict.fromkeys(args.case or CASES))
+    if args.family:
+        requested = [name for name in requested if CASES[name][0] in args.family]
+    if not requested:
+        parser.error("No cases match --case and --family")
+    families = list(dict.fromkeys(CASES[name][0] for name in requested))
     images = json.loads(args.triton_images.read_text()) if args.triton_images else {}
     for family in families:
         version = "3.14" if family == "pytorch" else "3.11"
@@ -99,9 +118,13 @@ def main():
     # Fail preflight before installing anything or creating partial results.
     requirements = {family: runtime_requirements(data, family) for family in families}
     for name, (family, relative) in CASES.items():
-        if family in families and not (data / relative).is_dir():
+        if name in requested and not (data / relative).is_dir():
             parser.error(f"Missing artifact for {name}: {data / relative}")
-    output.mkdir(parents=True, exist_ok=False)
+    try:
+        output.mkdir(parents=True, exist_ok=False)
+    except PermissionError:
+        parser.error(f"No write permission for {output.parent}; create a user-owned test directory first")
+    print(f"Test output: {output}", flush=True)
     if not args.triton_images:
         for version in sorted({"3.14" if f == "pytorch" else "3.11" for f in families}):
             folder = output / ("triton-runtime-python-" + version)
@@ -129,7 +152,9 @@ def main():
     cache.mkdir()
     results = []
     for family in families:
-        selected = [name for name, (kind, _) in CASES.items() if kind == family]
+        selected = [name for name in requested if CASES[name][0] == family]
+        scratch = output / "work" / family
+        scratch.mkdir(parents=True)
         requirements_file = output / f"{family}-requirements.txt"
         requirements_file.write_text(requirements[family])
         log = output / f"{family}.log"
@@ -144,6 +169,8 @@ def main():
             f"{os.getuid()}:{os.getgid()}",
             "-e",
             "HOME=/tmp",
+            "-e",
+            "TMPDIR=/tmp",
             "-e",
             "USER=mlflow",
             "-e",
@@ -173,6 +200,8 @@ def main():
             f"{output}:{output}:rw",
             "-v",
             f"{cache}:/pip-cache:rw",
+            "-v",
+            f"{scratch}:/tmp:rw",
             "-w",
             "/tmp",
             GROUPS[family][0],
