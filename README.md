@@ -260,5 +260,5 @@ When prompted, enter `__token__` as the username and a PyPI API token scoped to
 
 See [the twelve examples](examples/README.md) for four sklearn, four PyTorch and
 four Hugging Face cases using existing trained artifacts and independent input
-examples. The runner records local packaging failures and leaves live Triton
-validation explicitly unrun.
+examples. The full runner records local packaging failures and then validates
+successful packages with real Triton CPU servers and saved-artifact comparisons.

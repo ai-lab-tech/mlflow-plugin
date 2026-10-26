@@ -4,7 +4,7 @@ These examples exercise the new `sklearn.log_model`, `pytorch.log_model` and
 `transformers.log_model` wrappers with mandatory `input_example` requests.
 They reuse trained artifacts already present in the sibling generator repository.
 They do not train, download models, import training scripts, read benchmark request
-fixtures or expected answers, or start Triton. No LLM is involved.
+fixtures or expected answers, or use an LLM. The full runner below starts Triton for validation.
 
 | Family | Example | Coverage |
 | --- | --- | --- |
@@ -21,32 +21,65 @@ fixtures or expected answers, or start Triton. No LLM is involved.
 | Hugging Face | `huggingface_question_answering` | Local BERT, question/context inputs and tokenizer |
 | Hugging Face | `huggingface_generation` | Local SFT causal LM, tokenizer and deterministic eight-token generation |
 
-## Run all twelve with isolated dependencies
+## Run all twelve, including real Triton serving
 
 Docker must be running. From any working directory:
 
 ```bash
 python3 /home/ghost/git/mlflow-plugin/examples/run_real_models.py \
   --data-root /home/ghost/git/triton-model-generator/benchmarks/data \
-  --output /home/ghost/git/triton-model-generator/generated/mlflow-real-examples-12
+  --output /home/ghost/git/triton-model-generator/generated/mlflow-real-examples-serving
 ```
 
-The launcher pulls Python container images as needed and installs pinned inference
-libraries from the saved artifacts plus MLflow 3.17.2. It uses Python 3.11 for
-sklearn/Hugging Face and Python 3.14 for the saved PyTorch custom classes (their
-producer Python is 3.14). Package/image downloads require network access; model
-loading is offline. No training or live Triton service is started.
+Use the script in this repository, not the old `/tmp/triton-control-log-model-wrapper`
+copy. The output directory must be new; previous results are preserved.
 
-There are three temporary CPU containers with four cases each. Source artifacts
-and plugin code are mounted read-only. Outputs belong to your host user. The
-output path must be new. Follow progress in `sklearn.log`, `pytorch.log`, and
-`transformers.log` inside that directory. The combined `summary.json` contains
-all twelve outcomes, including installation failures and timeouts. Per-family
-SQLite tracking stores and logged packages remain in the corresponding folders.
-Use `--family sklearn` (repeatable) for a subset, or `--timeout 7200` to increase
-the default one-hour limit per family. A nonzero exit means at least one case
-did not pass. The launcher itself was checked with simulated Docker success,
-installation failure and timeout; actual container execution is left to you.
+The launcher first prepares CPU Triton images with Python 3.11 and 3.14 and
+matching Python backend stubs. It reuses its existing image tags on later runs.
+The initial build downloads image/build dependencies and can take considerable
+time and disk space. Build logs are retained under `triton-runtime-python-*/`.
+The default Triton base is `nvcr.io/nvidia/tritonserver:26.06-py3`; override it with
+`--triton-base-image`. You can supply `--triton-images path/to/images.json` instead
+of building; the mapping must contain `3.11` and `3.14` image names when running
+all families. The old benchmark map containing only 3.7/3.10 is insufficient.
+The server checks both the actual interpreter version and linked backend stub.
+
+Three isolated packaging containers install saved inference dependency versions
+and MLflow 3.17.2, then run four cases each. Python 3.14 preserves the producer
+version of the saved custom PyTorch classes. HF additionally installs the matching
+CPU torchvision 0.24.0 for torch 2.9.0. sklearn explicitly uses CloudPickle for
+these trusted, already-deserialized Python pipelines; PyTorch uses MLflow's
+compatible default pickle adapter, not raw cloudpickle as a pickle module.
+
+Every successful package then gets a fresh **actual Triton CPU server**:
+
+1. Install the recorded model and family dependencies.
+2. Start the generated model repository with its original config and model.py.
+3. Wait for server and model readiness.
+4. Send an HTTP inference request using binary tensor transport.
+5. Compare all output names, shapes, dtypes and values with an independent
+   prediction from the saved native MLflow artifact. Integers and strings are
+   exact; floats use `rtol=1e-5`, `atol=1e-6`, `equal_nan=True`.
+6. Save server/comparison logs and remove the temporary server container.
+
+The server has no published host port and its external network is disconnected
+before inference. Reference fixtures live outside the deployable model directory.
+Models are loaded offline; no training or model download occurs.
+
+The combined `summary.json` reports local and actual Triton validation separately.
+Local failures block serving and never count as Triton passes. Any failed or
+unexecuted case makes the command exit nonzero. Server details are in
+`triton/<case>/result.json`, `server.log`, `install.log`, and `comparison.log`.
+Packaging logs remain `sklearn.log`, `pytorch.log` and `transformers.log`.
+
+Use repeatable `--family sklearn` for a subset, `--timeout 7200` for dependency
+installation/packaging, `--startup-timeout 300` for server readiness and
+`--inference-timeout 300` for a request. Runtime image builds have separate live
+build logs. This is one example request per model, not the 88-case accuracy benchmark.
+
+The orchestration and comparisons have unit tests, including mismatched Python
+versions and failed inference. The full Docker/Triton run remains user-operated;
+this code change itself does not establish twelve successful serving results.
 
 ## Run
 
@@ -103,4 +136,4 @@ Framework dependency failures are reported separately in each case's error.
 Local loader checks completed for all four PyTorch examples and for SVM/MLP.
 The current inspection environment has sklearn 1.9.1: mixed-column and boosting
 load/predict checks failed there, so matching the saved environment is required.
-The complete 12-example logging run and actual Triton execution remain unrun.
+Use the full runner above to measure updated packaging and actual serving results.

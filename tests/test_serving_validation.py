@@ -1,0 +1,78 @@
+"""Serving comparison and orchestration tests; no Docker process is launched."""
+
+import importlib.util
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import numpy as np
+
+SOURCE = Path(__file__).resolve().parents[1] / "examples" / "serving_validation.py"
+SPEC = importlib.util.spec_from_file_location("serving_validation_test", SOURCE)
+serving = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(serving)
+
+
+class ServingValidationTests(unittest.TestCase):
+    def test_numeric_string_and_nonfinite_binary_comparison(self):
+        expected = {"score": np.array([1.0, np.nan, np.inf], dtype=np.float32), "label": np.array(["Berlin"])}
+        actual = {"score": expected["score"].copy(), "label": np.array([b"Berlin"], dtype=object)}
+        specs = [{"name": "score", "datatype": "FP32"}, {"name": "label", "datatype": "BYTES"}]
+        serving.compare_outputs(actual, expected, specs)
+        for replacement in [
+            np.array([2.0, np.nan, np.inf], dtype=np.float32),
+            expected["score"].astype(np.float64),
+            np.array([1], dtype=np.float32),
+        ]:
+            with self.assertRaises(AssertionError):
+                serving.compare_outputs({**actual, "score": replacement}, expected, specs)
+        with self.assertRaises(AssertionError):
+            serving.compare_outputs({"score": actual["score"]}, expected, specs)
+
+    def run_scenario(self, fail_client=False, version="3.11"):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            row = {
+                "case": "example",
+                "serving_path": str(root / "model"),
+                "fixture_path": str(root / "fixture.npz"),
+            }
+            options = SimpleNamespace(timeout=10, startup_timeout=5, inference_timeout=5)
+            commands = []
+
+            def run(command, **kwargs):
+                commands.append(command)
+                if fail_client and "/validation.py" in command:
+                    raise subprocess.CalledProcessError(1, command)
+                return subprocess.CompletedProcess(command, 0)
+
+            with (
+                patch.object(serving.subprocess, "run", side_effect=run),
+                patch.object(serving.subprocess, "check_output", side_effect=[version, "libpython3.11.so"]),
+            ):
+                result = serving.validate_serving(
+                    row, "runtime:test", "3.11", root / "requirements.txt", root / "result", options
+                )
+            self.assertTrue(any(c[:3] == ["docker", "rm", "-f"] for c in commands))
+            self.assertTrue((root / "result/result.json").is_file())
+            return result, commands
+
+    def test_success_requires_real_client_command(self):
+        result, commands = self.run_scenario()
+        self.assertEqual(result["triton_validation"], "passed")
+        self.assertTrue(any("/validation.py" in c for c in commands))
+        self.assertTrue(any("tritonserver" in " ".join(c) for c in commands))
+
+    def test_client_failure_is_not_a_pass(self):
+        result, _ = self.run_scenario(fail_client=True)
+        self.assertEqual(result["triton_validation"], "failed")
+        self.assertEqual(result["triton_stage"], "inference_comparison")
+
+    def test_abi_mismatch_blocks_install_and_inference(self):
+        result, commands = self.run_scenario(version="3.14")
+        self.assertEqual(result["triton_validation"], "failed")
+        self.assertEqual(result["triton_stage"], "python_compatibility")
+        self.assertFalse(any("/validation.py" in c for c in commands))
