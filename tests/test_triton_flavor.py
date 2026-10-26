@@ -3,6 +3,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from mlflow.exceptions import MlflowException
@@ -70,12 +71,24 @@ class TritonFlavorTests(unittest.TestCase):
 
     def test_log_model_forwards_registry_name_to_mlflow(self):
         # Arrange
-        info = object()
-        with patch.object(Model, "log", return_value=info) as log:
+        info = SimpleNamespace(registered_model_version="3")
+        with (
+            patch.object(Model, "log", return_value=info) as log,
+            patch.object(
+                triton, "_repository_s3_uri", return_value="s3://bucket/models/iris"
+            ),
+            patch.object(triton, "MlflowClient") as client,
+        ):
             # Act
             result = triton.log_model(self.source, registered_model_name="iris-serving")
         # Assert
         self.assertIs(result, info)
+        client.return_value.set_model_version_tag.assert_called_once_with(
+            name="iris-serving",
+            version="3",
+            key="triton_model_uri",
+            value="s3://bucket/models/iris",
+        )
         self.assertEqual(log.call_args.kwargs["registered_model_name"], "iris-serving")
         self.assertIs(log.call_args.kwargs["flavor"], triton)
         self.assertEqual(log.call_args.kwargs["triton_model_path"], self.source)

@@ -12,6 +12,8 @@ import httpx
 from mlflow.deployments import BaseDeploymentClient
 from mlflow.exceptions import MlflowException
 
+from mlflow_triton_control.triton import _resolve_repository_uri
+
 _NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 
@@ -20,11 +22,11 @@ def target_help() -> str:
     return (
         "Target: triton-control://<triton-control-host>[:port]. "
         "Install this package in the MLflow CLI environment. "
-        "Use -m s3://<profile-bucket>/<repository-prefix>/<model-name> and "
+        "Use -m models:/<model-id>, models:/<name>/<version>, runs:/<run-id>/<path>, or s3://<bucket>/<prefix>/<model-name> and "
         "-C s3_profile_id=<owned-profile-id> -C image=<triton-image>. "
         "The model must already exist in Triton repository format. "
         "Set TRITON_CONTROL_TOKEN to a user-bound API token. "
-        "MLflow models:/ and runs:/ artifacts, update, predict and local serving are unsupported."
+        "MLflow models must use the triton flavor and an S3-backed artifact store accessible by the selected profile. Update, predict and local serving are unsupported."
     )
 
 
@@ -103,6 +105,7 @@ class TritonControlDeploymentClient(BaseDeploymentClient):
             ) from exc
         if not math.isfinite(timeout) or timeout <= 0:
             raise MlflowException("wait_timeout_seconds must be a positive number")
+        model_uri = _resolve_repository_uri(model_uri)
         uri = urlsplit(model_uri)
         parts = uri.path.strip("/").split("/")
         if (

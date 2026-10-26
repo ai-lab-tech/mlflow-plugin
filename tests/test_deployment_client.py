@@ -38,14 +38,31 @@ class DeploymentClientTests(unittest.TestCase):
         self.assertEqual(payload["repository_prefix"], "dev")
         self.assertEqual(payload["model_name"], "iris_classifier")
 
-    def test_mlflow_registry_uri_is_rejected(self) -> None:
-        # Arrange
-        model_uri = "models:/iris/1"
-        config = {"s3_profile_id": 7, "image": "triton:latest"}
-
-        # Act / Assert
-        with self.assertRaises(MlflowException):
-            self.client.create_deployment("iris", model_uri, config=config)
+    def test_mlflow_registry_uri_is_resolved_before_create(self):
+        with (
+            patch(
+                "mlflow_triton_control.deployment_client._resolve_repository_uri",
+                return_value="s3://models/experiment/model/iris_classifier",
+            ) as resolve,
+            patch.object(
+                self.client, "_request", return_value={"instance_id": 42}
+            ) as request,
+            patch.object(
+                self.client, "get_deployment", return_value={"status": "ready"}
+            ),
+        ):
+            self.client.create_deployment(
+                "iris",
+                "models:/iris/1",
+                config={"s3_profile_id": 7, "image": "triton:latest"},
+            )
+        resolve.assert_called_once_with("models:/iris/1")
+        payload = request.call_args.kwargs["json"]
+        self.assertEqual(
+            payload["model_uri"], "s3://models/experiment/model/iris_classifier"
+        )
+        self.assertEqual(payload["repository_prefix"], "experiment/model")
+        self.assertEqual(payload["model_name"], "iris_classifier")
 
     def test_invalid_timeout_is_rejected_before_create(self) -> None:
         for timeout in ("later", "nan", "inf", "-inf", 0, -1):

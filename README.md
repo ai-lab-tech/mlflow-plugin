@@ -116,10 +116,23 @@ and returns the local Triton model directory. Omit `registered_model_name` to
 save a model without creating a Registry version. This API is in the plugin
 package, not in MLflow's `mlflow.triton` namespace.
 
-The current deployment client still accepts an already-published `s3://` Triton
-repository URI. Deploying directly from `models:/...` and copying that version
-to the selected S3 profile are separate planned changes. The current Iris
-workflow therefore continues to use the S3 URI.
+`triton.log_model()` automatically sets the `triton_model_uri` version tag to
+the concrete S3 repository URI when registering a model in an S3-backed artifact
+store. It still returns MLflow's `ModelInfo`; use `model_info.model_uri` directly
+with the deployment client. Local artifact stores remain supported for logging
+and loading, but S3-backed storage is required for deployment.
+
+The deployment client accepts `models:/<model-id>`, registered model references
+such as `models:/iris-serving/1` or `models:/iris-serving@candidate`, `runs:/`
+model references, and existing `s3://` repository URIs. MLflow references must
+have the `triton` flavor. The plugin resolves their artifact location and the
+flavor's model directory before calling Triton Control. Proxy artifact storage
+is resolved using Triton Control's MLflow artifact-store endpoint and the current
+MLflow tracking credentials.
+
+The selected S3 profile must have read access to the MLflow artifact bucket and
+endpoint. This uses the repository already stored by MLflow; it does not copy it
+to a different bucket or profile prefix.
 
 ## Argo Workflows
 
@@ -148,29 +161,67 @@ Workflow owner reference for garbage collection.
 The opted-in Workflow must have a fixed `metadata.name` and run in the Triton
 Control namespace. Direct submissions to Argo bypass this token injection.
 
-## S3 deployment of logged models (0.3.0)
+## S3 deployment of logged models (0.3.1)
 
-The Triton flavor now stores data under `model/<original-model-name>/` inside
-the MLflow Model. Pass the concrete S3 URI of that subdirectory to the deployment
-plugin, using an S3 profile that can read the artifact bucket. Resolve proxy
-artifact locations against the managed server's S3 root; the deployment client
-continues to accept only S3 URIs. Existing models using `data: model` remain
-loadable. See the Iris auto-deployment workflow for the complete example.
+The Triton flavor stores data under `model/<original-model-name>/` inside the
+MLflow Model. Pass `ModelInfo.model_uri` directly to the deployment plugin;
+S3-backed registered versions receive the concrete repository URI in their
+`triton_model_uri` tag automatically. The selected S3 profile must be able to
+read the artifact bucket. Existing models using `data: model` remain loadable.
+See the Iris auto-deployment workflow for the complete example.
 
-## Publishing
+## Publishing a wheel to PyPI
 
-Publish manually from the repository root, using a fresh output directory for
-each release:
+Run from the `mlflow-plugin` repository root. Set the new release version in
+`pyproject.toml` first; the commands below use `0.3.1`. Use a fresh output directory
+for every release so that older distributions are not uploaded accidentally.
+
+Create a release environment, build the wheel and source distribution, and check
+their metadata and README rendering with a current Twine version:
 
 ```bash
+python3 -m venv /tmp/mlflow-release-tools
+. /tmp/mlflow-release-tools/bin/activate
 python -m pip install --upgrade build twine
-python -m build --outdir dist/mlflow-triton-control-0.3.0
-python -m twine check dist/mlflow-triton-control-0.3.0/*
-python -m twine upload dist/mlflow-triton-control-0.3.0/*
+python -m build --outdir dist/mlflow-triton-control-0.3.1
+python -m twine check dist/mlflow-triton-control-0.3.1/*
 ```
 
-When prompted, enter `__token__` as the username and a PyPI API token scoped to
-`mlflow-triton-control` as the password.
+Create a PyPI API token under [PyPI account settings](https://pypi.org/manage/account/),
+scoped to `mlflow-triton-control`. Upload the wheel to the official PyPI registry:
+
+```bash
+python -m twine upload \
+  --repository-url https://upload.pypi.org/legacy/ \
+  --username __token__ \
+  dist/mlflow-triton-control-0.3.1/*.whl
+```
+
+When prompted for the password/API token, paste your PyPI API token. The terminal
+hides the input. Do not put the token in source files or commit it to Git.
+Twine needs distribution **files**, not a directory: keep `*.whl` at the end of
+the path. To also publish the source distribution, upload it separately:
+
+```bash
+python -m twine upload \
+  --repository-url https://upload.pypi.org/legacy/ \
+  --username __token__ \
+  dist/mlflow-triton-control-0.3.1/*.tar.gz
+```
+
+If the build files are already in another directory, use that directory's
+`*.whl` or `*.tar.gz` path instead; rebuilding is not required. PyPI does not allow
+replacing an uploaded release file. Publish subsequent changes with a new version.
+
+After publishing, install the release into your training/deployment environment:
+
+```bash
+python -m pip install --upgrade "mlflow-triton-control==0.3.1"
+mlflow deployments help -t triton-control
+```
+
+The help command confirms that MLflow can discover the installed plugin; it does
+not create a deployment.
 
 ## Contract tests
 

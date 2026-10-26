@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
+import httpx
 import mlflow
+from mlflow import MlflowClient
 from mlflow.artifacts import download_artifacts
 from mlflow.exceptions import MlflowException
-from mlflow.models import Model
+from mlflow.models import Model, get_model_info
 
 FLAVOR_NAME = "triton"
 _MODEL_DATA = "model"
@@ -112,9 +116,11 @@ def log_model(
     """Log a Triton repository and optionally register a model version.
 
     Returns MLflow's ``ModelInfo``. A registry version is created only when
-    ``registered_model_name`` is given.
+    ``registered_model_name`` is given. S3-backed registered versions receive a
+    ``triton_model_uri`` tag automatically. ``ModelInfo.model_uri`` can be passed
+    directly to the deployment client.
     """
-    return Model.log(
+    info = Model.log(
         artifact_path=None,
         flavor=sys.modules[__name__],
         name=name,
@@ -124,6 +130,98 @@ def log_model(
         metadata=metadata,
         triton_model_path=triton_model_path,
     )
+
+    if registered_model_name and info.registered_model_version:
+        repository_uri = _repository_s3_uri(info)
+        if repository_uri is not None:
+            MlflowClient().set_model_version_tag(
+                name=registered_model_name,
+                version=info.registered_model_version,
+                key="triton_model_uri",
+                value=repository_uri,
+            )
+    return info
+
+
+def _repository_s3_uri(model_info):
+    """Resolve a Triton flavor's data directory in an S3-backed artifact store.
+
+    Local/non-S3 stores remain usable for logging but cannot be deployed through
+    an S3 profile. Proxy stores use Triton Control's artifact-store endpoint.
+    """
+    flavor = model_info.flavors.get(FLAVOR_NAME)
+    if not flavor:
+        raise MlflowException("MLflow model has no triton flavor")
+    data = flavor.get("data", "")
+    if (
+        not isinstance(data, str)
+        or any(part in {"", ".", ".."} for part in data.split("/"))
+        or "\\" in data
+    ):
+        raise MlflowException("Triton flavor contains an invalid data path")
+    if model_info.model_id:
+        location = mlflow.get_logged_model(model_info.model_id).artifact_location
+    else:
+        run_root = MlflowClient().get_run(model_info.run_id).info.artifact_uri
+        location = run_root.rstrip("/") + "/" + model_info.artifact_path
+    parsed = urlsplit(location)
+    if parsed.scheme == "mlflow-artifacts":
+        parts = unquote(parsed.path).strip("/").split("/")
+        if (
+            parsed.netloc
+            or parsed.query
+            or parsed.fragment
+            or any(part in {"", ".", ".."} for part in parts)
+        ):
+            raise MlflowException("Invalid MLflow proxy artifact location")
+        tracking_uri = mlflow.get_tracking_uri().rstrip("/")
+        if urlsplit(tracking_uri).scheme not in {"http", "https"}:
+            raise MlflowException("Proxy artifact resolution requires HTTP tracking")
+        token = os.getenv("MLFLOW_TRACKING_TOKEN") or os.getenv("TRITON_CONTROL_TOKEN")
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        try:
+            response = httpx.get(
+                tracking_uri + "/api/2.0/mlflow/triton-control/artifact-store",
+                headers=headers,
+                timeout=30,
+                follow_redirects=False,
+                verify=os.getenv("MLFLOW_TRACKING_SERVER_CERT_PATH") or True,
+            )
+            response.raise_for_status()
+            root = response.json()["artifact_root"]
+            if not isinstance(root, str) or urlsplit(root).scheme != "s3":
+                raise ValueError("Artifact store must be S3-backed")
+            location = root.rstrip("/") + "/" + "/".join(parts)
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            raise MlflowException(
+                "Cannot resolve Triton Control's S3 artifact store"
+            ) from exc
+        parsed = urlsplit(location)
+    elif parsed.scheme != "s3":
+        return None
+    if (
+        not parsed.netloc
+        or parsed.query
+        or parsed.fragment
+        or any(
+            part in {"", ".", ".."}
+            for part in unquote(parsed.path).strip("/").split("/")
+        )
+    ):
+        raise MlflowException("Invalid S3 model artifact location")
+    return location.rstrip("/") + "/" + data
+
+
+def _resolve_repository_uri(model_uri):
+    """Accept direct S3 repositories or resolve MLflow model references."""
+    if urlsplit(model_uri).scheme in {"models", "runs"}:
+        repository_uri = _repository_s3_uri(get_model_info(model_uri))
+        if repository_uri is None:
+            raise MlflowException(
+                "Triton deployment requires an S3-backed MLflow model"
+            )
+        return repository_uri
+    return model_uri
 
 
 def load_model(model_uri):
