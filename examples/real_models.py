@@ -186,6 +186,7 @@ def main():
             import shutil
 
             import numpy as np
+
             from mlflow_triton_control import _runtime, triton
 
             repository = triton.load_model(info.model_uri)
