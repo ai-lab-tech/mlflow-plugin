@@ -165,3 +165,39 @@ and their original report untouched. It does not merge scores automatically.
 Packaging containers bind their `/tmp` (including Python environments and MLflow
 staging files) to `<output>/work/<family>`, with `TMPDIR=/tmp`. These work folders
 are retained with the run. Docker serving scratch uses Docker's data disk.
+
+## Select CPU or GPU serving
+
+```bash
+# Default: all twelve cases on CPU
+python examples/run_real_models.py --device cpu
+
+# GPU: four PyTorch and four Hugging Face cases
+python examples/run_real_models.py --device gpu
+
+# One GPU case
+python examples/run_real_models.py --device gpu --case huggingface_generation
+```
+
+`--device` defaults to `cpu` and is forwarded to the public `log_model` wrappers.
+Selecting GPU without case/family filters selects the eight GPU-capable framework
+examples. Explicitly selecting sklearn with GPU is an error; it never silently
+runs sklearn on CPU in a GPU report.
+
+GPU runs require an NVIDIA GPU, a compatible driver and Docker GPU support.
+The runtime builder enables GPU support in the Python backend stub and uses
+separate `-gpu` image tags. If supplying `--triton-images`, supply images built
+for the requested device, with matching Python versions. GPU dependency lists
+retain framework versions but replace CPU-only wheel pins with their public
+versions from PyPI. The runtime verifies that the resulting PyTorch build has
+CUDA support and can execute a CUDA operation before launching the server.
+Missing GPU access or incompatible CUDA dependencies fail clearly.
+
+Logging and native reference predictions still run on CPU. Triton receives
+`KIND_GPU` configuration and Docker GPU access; the client also verifies Triton's
+reported instance kind. Response comparisons use the same CPU reference fixtures
+and unchanged tolerances as CPU runs. GPU runs use the first CUDA-visible GPU.
+Each case records `device` in the report, with GPU preflight details in `gpu.log`.
+No GPU inference result has been established by these code/unit-test changes;
+run the command above to measure it. GPU numerical differences remain failures
+rather than automatically relaxing comparison criteria.

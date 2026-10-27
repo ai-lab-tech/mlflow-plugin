@@ -1,4 +1,4 @@
-"""Actual Triton CPU serving checks; fixtures stay outside the model package."""
+"""Actual Triton CPU/GPU serving checks; fixtures stay outside the model package."""
 
 from __future__ import annotations
 
@@ -51,6 +51,7 @@ def client_main():
     parser.add_argument("--model", required=True)
     parser.add_argument("--startup-timeout", type=int, required=True)
     parser.add_argument("--inference-timeout", type=int, required=True)
+    parser.add_argument("--device", choices=["cpu", "gpu"], default="cpu")
     args = parser.parse_args()
     contract = json.loads(Path("/model/1/contract.json").read_text())
     with np.load("/fixture.npz", allow_pickle=False) as fixture:
@@ -71,6 +72,11 @@ def client_main():
             if time.monotonic() >= deadline:
                 raise TimeoutError("Triton server/model did not become ready")
             time.sleep(1)
+        config = client.get_model_config(args.model)
+        groups = config.get("instance_group", [])
+        expected_kind = "KIND_GPU" if args.device == "gpu" else "KIND_CPU"
+        if not groups or any(group.get("kind") != expected_kind for group in groups):
+            raise AssertionError(f"Triton instance configuration does not match {args.device}")
         request = []
         for spec in contract["inputs"]:
             array = inputs[spec["name"]]
@@ -109,7 +115,13 @@ def validate_serving(row, image, python_version, requirements, directory, option
     fixture = Path(row["fixture_path"]).resolve()
     helper = Path(__file__).resolve()
     name = "mlflow-serving-" + uuid.uuid4().hex[:12]
-    result = {"triton_validation": "failed", "triton_stage": "container_start", "triton_image": image}
+    device = getattr(options, "device", "cpu")
+    result = {
+        "device": device,
+        "triton_validation": "failed",
+        "triton_stage": "container_start",
+        "triton_image": image,
+    }
 
     def run(command, filename, timeout=60):
         with (directory / filename).open("a") as log:
@@ -123,8 +135,27 @@ def validate_serving(row, image, python_version, requirements, directory, option
                 "-d",
                 "--name",
                 name,
-                "--runtime",
-                "runc",
+                *(
+                    [
+                        "--gpus",
+                        "all",
+                        "-e",
+                        "NVIDIA_VISIBLE_DEVICES=all",
+                        "-e",
+                        "NVIDIA_DRIVER_CAPABILITIES=compute,utility",
+                        "-e",
+                        "CUDA_VISIBLE_DEVICES=0",
+                    ]
+                    if device == "gpu"
+                    else [
+                        "--runtime",
+                        "runc",
+                        "-e",
+                        "CUDA_VISIBLE_DEVICES=-1",
+                        "-e",
+                        "NVIDIA_VISIBLE_DEVICES=void",
+                    ]
+                ),
                 "--entrypoint",
                 "sleep",
                 "--shm-size",
@@ -133,10 +164,6 @@ def validate_serving(row, image, python_version, requirements, directory, option
                 "PYTHONPATH=/tmp/model-deps",
                 "-e",
                 "PYTHONDONTWRITEBYTECODE=1",
-                "-e",
-                "CUDA_VISIBLE_DEVICES=-1",
-                "-e",
-                "NVIDIA_VISIBLE_DEVICES=void",
                 "-e",
                 "HF_HUB_OFFLINE=1",
                 "-e",
@@ -205,8 +232,7 @@ def validate_serving(row, image, python_version, requirements, directory, option
                 "--target",
                 "/tmp/model-deps",
                 "--upgrade",
-                "--extra-index-url",
-                "https://download.pytorch.org/whl/cpu",
+                *(["--extra-index-url", "https://download.pytorch.org/whl/cpu"] if device == "cpu" else []),
                 "-r",
                 "/family-requirements.txt",
                 "-r",
@@ -216,6 +242,23 @@ def validate_serving(row, image, python_version, requirements, directory, option
             "install.log",
             options.timeout,
         )
+        if device == "gpu":
+            result["triton_stage"] = "gpu_availability"
+            run(
+                [
+                    "docker",
+                    "exec",
+                    name,
+                    "python3",
+                    "-c",
+                    "import torch; assert torch.version.cuda is not None, 'CPU-only PyTorch wheel'; "
+                    "assert torch.cuda.is_available(), 'CUDA unavailable'; "
+                    "x=torch.ones(1, device='cuda:0'); torch.cuda.synchronize(); "
+                    "print(torch.version.cuda, torch.cuda.get_device_name(0), x.device)",
+                ],
+                "gpu.log",
+                options.startup_timeout,
+            )
         result["triton_stage"] = "server_start"
         # Inference needs no network access outside the container.
         run(["docker", "network", "disconnect", "bridge", name], "runtime.log")
@@ -244,6 +287,8 @@ def validate_serving(row, image, python_version, requirements, directory, option
                 "/validation.py",
                 "--model",
                 row["case"],
+                "--device",
+                device,
                 "--startup-timeout",
                 str(options.startup_timeout),
                 "--inference-timeout",

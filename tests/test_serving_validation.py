@@ -32,7 +32,7 @@ class ServingValidationTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             serving.compare_outputs({"score": actual["score"]}, expected, specs)
 
-    def run_scenario(self, fail_client=False, version="3.11"):
+    def run_scenario(self, fail_client=False, version="3.11", device="cpu", fail_gpu=False):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             row = {
@@ -40,11 +40,13 @@ class ServingValidationTests(unittest.TestCase):
                 "serving_path": str(root / "model"),
                 "fixture_path": str(root / "fixture.npz"),
             }
-            options = SimpleNamespace(timeout=10, startup_timeout=5, inference_timeout=5)
+            options = SimpleNamespace(timeout=10, startup_timeout=5, inference_timeout=5, device=device)
             commands = []
 
             def run(command, **kwargs):
                 commands.append(command)
+                if fail_gpu and any("torch.cuda.is_available()" in part for part in command):
+                    raise subprocess.CalledProcessError(1, command)
                 if fail_client and "/validation.py" in command:
                     raise subprocess.CalledProcessError(1, command)
                 return subprocess.CompletedProcess(command, 0)
@@ -76,3 +78,30 @@ class ServingValidationTests(unittest.TestCase):
         self.assertEqual(result["triton_validation"], "failed")
         self.assertEqual(result["triton_stage"], "python_compatibility")
         self.assertFalse(any("/validation.py" in c for c in commands))
+
+    def test_gpu_enables_docker_cuda_and_checks_availability(self):
+        result, commands = self.run_scenario(device="gpu")
+        self.assertEqual(result["triton_validation"], "passed")
+        self.assertEqual(result["device"], "gpu")
+        command = next(c for c in commands if c[:2] == ["docker", "run"])
+        self.assertIn("--gpus", command)
+        self.assertNotIn("CUDA_VISIBLE_DEVICES=-1", command)
+        self.assertNotIn("NVIDIA_VISIBLE_DEVICES=void", command)
+        self.assertTrue(any("torch.cuda.is_available()" in " ".join(c) for c in commands))
+        client = next(c for c in commands if "/validation.py" in c)
+        self.assertEqual(client[client.index("--device") + 1], "gpu")
+        install = next(c for c in commands if "pip" in c)
+        self.assertNotIn("https://download.pytorch.org/whl/cpu", install)
+
+    def test_gpu_failure_does_not_fall_back_to_cpu(self):
+        result, commands = self.run_scenario(device="gpu", fail_gpu=True)
+        self.assertEqual(result["triton_validation"], "failed")
+        self.assertEqual(result["triton_stage"], "gpu_availability")
+        self.assertFalse(any("/validation.py" in c for c in commands))
+
+    def test_cpu_keeps_gpu_hidden(self):
+        result, commands = self.run_scenario()
+        command = next(c for c in commands if c[:2] == ["docker", "run"])
+        self.assertEqual(result["device"], "cpu")
+        self.assertNotIn("--gpus", command)
+        self.assertIn("CUDA_VISIBLE_DEVICES=-1", command)

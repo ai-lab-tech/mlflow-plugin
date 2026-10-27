@@ -1,4 +1,4 @@
-"""Build reusable CPU Triton images with matching Python interpreters and stubs."""
+"""Build reusable CPU/GPU Triton images with matching Python interpreters and stubs."""
 
 import argparse
 import json
@@ -8,11 +8,19 @@ import sys
 from pathlib import Path
 
 
-def dockerfile(image, version):
+def dockerfile(image, version, device="cpu"):
+    if device not in ("cpu", "gpu"):
+        raise ValueError("device must be cpu or gpu")
     release = re.fullmatch(r"nvcr\.io/nvidia/tritonserver:(\d{2}\.\d{2})-py3", image)
     if not release or not re.fullmatch(r"3\.\d+", version):
         raise ValueError("Use a versioned NVIDIA Triton py3 image and a Python 3.x version")
     branch = "r" + release[1]
+    gpu = "ON" if device == "gpu" else "OFF"
+    visibility = (
+        "ENV CUDA_VISIBLE_DEVICES=-1 NVIDIA_VISIBLE_DEVICES=void"
+        if device == "cpu"
+        else "ENV NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility"
+    )
     return f'''FROM mambaorg/micromamba:2.3.3 AS mamba
 FROM {image}
 USER root
@@ -32,7 +40,7 @@ RUN /usr/bin/python3 -m pip install --no-cache-dir --only-binary=:all: --timeout
     && /opt/triton-build-tools/cmake/data/bin/cmake --version
 RUN git clone --depth 1 --branch {branch} https://github.com/triton-inference-server/python_backend /tmp/python_backend \\
     && /opt/triton-build-tools/cmake/data/bin/cmake -S /tmp/python_backend -B /tmp/stub-build \\
-       -DTRITON_ENABLE_GPU=OFF -DTRITON_ENABLE_METRICS=OFF \\
+       -DTRITON_ENABLE_GPU={gpu} -DTRITON_ENABLE_METRICS=OFF \\
        -DTRITON_BACKEND_REPO_TAG={branch} -DTRITON_COMMON_REPO_TAG={branch} -DTRITON_CORE_REPO_TAG={branch} \\
        -DPYTHON_EXECUTABLE=/opt/triton-test-python/bin/python \\
        -DPython_EXECUTABLE=/opt/triton-test-python/bin/python \\
@@ -42,7 +50,7 @@ RUN git clone --depth 1 --branch {branch} https://github.com/triton-inference-se
     && ldd /opt/tritonserver/backends/python/triton_python_backend_stub | grep 'libpython{version}' \\
     && rm -rf /tmp/python_backend /tmp/stub-build
 RUN python3 -c 'import sys; assert sys.version_info[:2] == tuple(map(int, "{version}".split(".")))'
-ENV CUDA_VISIBLE_DEVICES=-1 NVIDIA_VISIBLE_DEVICES=void
+{visibility}
 '''
 
 
@@ -81,16 +89,19 @@ def main():
     parser.add_argument(
         "--prepare-only", action="store_true", help="Write Dockerfiles without running Docker"
     )
+    parser.add_argument("--device", choices=["cpu", "gpu"], default="cpu")
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     mapping = json.loads(args.output.read_text()) if args.output.exists() else {}
     for version in args.versions:
-        source = dockerfile(args.image, version)
+        source = dockerfile(args.image, version, args.device)
         folder = args.output.parent / ("triton-runtime-python-" + version)
         folder.mkdir(exist_ok=True)
         (folder / "Dockerfile").write_text(source)
         release = args.image.split(":")[1]
         tag = "triton-generator-runtime:{}-python{}".format(release, version)
+        if args.device == "gpu":
+            tag += "-gpu"
         if args.prepare_only:
             print("Prepared Dockerfile: " + str(folder / "Dockerfile"), flush=True)
             continue
