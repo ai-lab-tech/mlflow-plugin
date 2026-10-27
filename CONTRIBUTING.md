@@ -20,8 +20,10 @@ pip install ruff build twine
 Install PyTorch/Transformers separately to run their optional tests. Release CI
 requires a CPU framework job with PyTorch, Transformers and tritonclient installed;
 `--fail-on-skip` makes skipped tests fail that job. The custom HF
-unit test uses small synthetic weights and local architecture source; full example
-weights are only needed by the serving runner. Git LFS is required for those weights.
+unit test uses small synthetic weights and local architecture source from
+`tests/fixtures/huggingface_custom`; no private data is needed for unit tests.
+Full example weights are only needed by the serving runner. Follow
+[dataset setup](examples/data/README.md) for public/private fixtures and Git LFS.
 
 ## Checks
 

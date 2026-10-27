@@ -27,8 +27,7 @@ class CustomHuggingFaceTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.fixture = (
-            Path(__file__).resolve().parents[1]
-            / "examples/data/huggingface_custom/bundle"
+            Path(__file__).resolve().parents[1] / "tests/fixtures/huggingface_custom"
         )
         environment = patch.dict(
             os.environ,

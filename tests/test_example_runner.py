@@ -33,6 +33,27 @@ class ExampleRunnerTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
 
+    def test_explicit_missing_private_case_reports_preparation_command(self):
+        # Arrange
+        with tempfile.TemporaryDirectory() as temporary:
+            # Act / Assert
+            with self.assertRaisesRegex(
+                ValueError, "huggingface_custom.*private.*include-private"
+            ):
+                runner.select_cases(Path(temporary), ["huggingface_custom"])
+
+    def test_default_selection_uses_only_available_cases(self):
+        # Arrange
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / runner.CASES["pytorch_polynomial"][1]).mkdir(parents=True)
+
+            # Act
+            selected = runner.select_cases(root)
+
+            # Assert
+            self.assertEqual(selected, ["pytorch_polynomial"])
+
     def test_configurable_output_paths_and_precedence(self):
         with tempfile.TemporaryDirectory() as tmp:
             # Arrange

@@ -4,7 +4,7 @@ The root Apache-2.0 license applies to original project code. It does not replac
 the licenses of included upstream sources, pretrained model assets or dependencies.
 Original copyright and source notices remain in their files.
 
-## Included example source code
+## Example source code across public and private fixtures
 
 The source revisions below come from the dataset's `invocation.json` and
 `preparation.json` provenance. License texts were retrieved from those exact
@@ -53,7 +53,8 @@ terms and derived-weight redistribution for the retained fixtures, especially:
   and synthetic inputs, as identified by the retained scripts and run evidence.
 
 This review is **not complete**. No blanket Apache-2.0 claim is made for the test
-dataset, and model files have not been removed or relicensed. If an artifact cannot
+dataset. Eight cases are now in the private data repository; their contents have
+not been relicensed. The shared catalog identifies their status and location. If an artifact cannot
 be redistributed, resolve both the current tree and previously committed Git LFS
 history before publication. See [dataset provenance](examples/data/README.md).
 
@@ -64,3 +65,6 @@ They are not bundled into the plugin wheels. Review the actual versions in packa
 metadata, each fixture's requirements and the selected runtime image when preparing
 a distribution. This notice is an inventory of included materials, not a complete
 license audit of every transitive dependency.
+
+The public working tree retains five synthetic-data cases. Historical Git/LFS
+objects still require the [publication review](docs/DATA_PUBLICATION.md).

@@ -8,30 +8,7 @@ import json
 import os
 from pathlib import Path
 
-DEFAULT_DATA_ROOT = Path(__file__).resolve().parent / "data"
-
-# Paths are relative to the repository-local examples/data directory.
-CASES = {
-    "sklearn_mixed_columns": ("sklearn", "sklearn_mixed_columns/bundle"),
-    "sklearn_gradient_boosting": (
-        "sklearn",
-        "sklearn_gradient_boosting/bundle",
-    ),
-    "sklearn_scaled_svm": ("sklearn", "sklearn_scaled_svm/bundle"),
-    "sklearn_scaled_mlp": ("sklearn", "sklearn_scaled_mlp/bundle"),
-    "pytorch_polynomial": ("pytorch", "pytorch_polynomial"),
-    "pytorch_custom_network": ("pytorch", "pytorch_custom_network"),
-    "pytorch_mnist_lstm": ("pytorch", "pytorch_mnist_lstm"),
-    "pytorch_dcgan": ("pytorch", "pytorch_dcgan"),
-    "huggingface_custom": ("transformers", "huggingface_custom/bundle"),
-    "huggingface_classification": ("transformers", "huggingface_classification/bundle"),
-    "huggingface_ner": ("transformers", "huggingface_ner/bundle"),
-    "huggingface_question_answering": (
-        "transformers",
-        "huggingface_question_answering/bundle",
-    ),
-    "huggingface_generation": ("transformers", "huggingface_generation/bundle"),
-}
+from data_catalog import CASES, DEFAULT_DATA_ROOT, select_cases
 
 
 def load_example(name, data_root):
@@ -186,7 +163,7 @@ def main():
         "--data-root",
         type=Path,
         default=DEFAULT_DATA_ROOT,
-        help="Saved artifacts; default: examples/data in this checkout",
+        help="Saved artifacts; defaults to MLFLOW_TRITON_DATA_ROOT or public examples/data",
     )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--case", action="append", choices=CASES)
@@ -203,13 +180,10 @@ def main():
         return 0
     if args.output is None:
         parser.error("--output is required unless --list is used")
-    selected = args.case or [
-        name
-        for name, (family, _) in CASES.items()
-        if args.device == "cpu" or family != "sklearn"
-    ]
-    if args.device == "gpu" and any(CASES[name][0] == "sklearn" for name in selected):
-        parser.error("sklearn supports CPU only")
+    try:
+        selected = select_cases(args.data_root, args.case, device=args.device)
+    except ValueError as error:
+        parser.error(str(error))
     # Make running examples explicit and independent of configured remote tracking.
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)

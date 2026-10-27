@@ -1,0 +1,643 @@
+{
+  "schema_version": 1,
+  "sources": {
+    "public": {
+      "kind": "bundled",
+      "path": "data"
+    },
+    "private": {
+      "kind": "git",
+      "url": "git@github.com:ai-lab-tech/mlflow-plugin-testdata.git",
+      "revision": "254447e602a2a9b079ddfcf7364435783728a109",
+      "path": "data"
+    }
+  },
+  "cases": {
+    "sklearn_mixed_columns": {
+      "family": "sklearn",
+      "source": "private",
+      "license_status": "needs_review",
+      "license_evidence": "See THIRD_PARTY_NOTICES.md and original case provenance; redistribution not cleared.",
+      "artifact_path": "sklearn_mixed_columns/bundle",
+      "dataset_directory": "sklearn_mixed_columns",
+      "files": {
+        "bundle/model.joblib": {
+          "size": 4618,
+          "sha256": "a8ce93597e6ff0f9192dca27f091438f254b66d653dce913649d4018bf1597b6"
+        },
+        "bundle/requirements.txt": {
+          "size": 354,
+          "sha256": "3fc16de8e59d89891eedce6778a79f2e49a7812e0b8e8cff99a24ec0e5439d37"
+        },
+        "bundle/training/examples/compose/plot_column_transformer_mixed_types.py": {
+          "size": 7783,
+          "sha256": "beb864094431398a1fbaf23e49d5c2ed8434af1b765c211020cdc3c9b645f72c"
+        },
+        "bundle/training/pyproject.toml": {
+          "size": 14216,
+          "sha256": "9035b0add4bed5730748437b18713f35a392974bfa0d72cc4c9c2f59fc9cf7d4"
+        },
+        "invocation.json": {
+          "size": 857,
+          "sha256": "f2f368f2384dc7561a26f78910454e80a8956658685b9965143fb423ae31feee"
+        },
+        "result.json": {
+          "size": 1971,
+          "sha256": "51ad35da9af9df3e6ca2086e15966f276044f00a218bd0a7f4047584215035a1"
+        }
+      }
+    },
+    "sklearn_gradient_boosting": {
+      "family": "sklearn",
+      "source": "public",
+      "license_status": "documented_synthetic",
+      "license_evidence": "Synthetic make_hastie_10_2 data; BSD-3-Clause upstream example.",
+      "artifact_path": "sklearn_gradient_boosting/bundle",
+      "dataset_directory": "sklearn_gradient_boosting",
+      "files": {
+        "bundle/model.joblib": {
+          "size": 297774,
+          "sha256": "8688787e1ff676bb9392ff3dccc170597ed9e51b52a84a4bd8ca8302cf925299"
+        },
+        "bundle/requirements.txt": {
+          "size": 354,
+          "sha256": "3fc16de8e59d89891eedce6778a79f2e49a7812e0b8e8cff99a24ec0e5439d37"
+        },
+        "bundle/training/examples/ensemble/plot_gradient_boosting_regularization.py": {
+          "size": 2689,
+          "sha256": "137e0d66375c01b585c0cd96204c37781a5200b254f1e74c1284c71580bb05b4"
+        },
+        "bundle/training/pyproject.toml": {
+          "size": 14216,
+          "sha256": "9035b0add4bed5730748437b18713f35a392974bfa0d72cc4c9c2f59fc9cf7d4"
+        },
+        "invocation.json": {
+          "size": 842,
+          "sha256": "3817b1122861033afa14e0a43a986da745b6e46b4b167dd1633a2b31b6caebdf"
+        },
+        "result.json": {
+          "size": 2004,
+          "sha256": "1cc26ee5f451bef592020a195b83fa8e307f33119101712f095bcf777162ff48"
+        }
+      }
+    },
+    "sklearn_scaled_svm": {
+      "family": "sklearn",
+      "source": "private",
+      "license_status": "needs_review",
+      "license_evidence": "See THIRD_PARTY_NOTICES.md and original case provenance; redistribution not cleared.",
+      "artifact_path": "sklearn_scaled_svm/bundle",
+      "dataset_directory": "sklearn_scaled_svm",
+      "files": {
+        "bundle/StandardScaler.joblib": {
+          "size": 663,
+          "sha256": "8f90f47fe692d885a7e2483ba10d8890fcce9be3fd34adad0a2f0f85114ed2a5"
+        },
+        "bundle/model.joblib": {
+          "size": 4427,
+          "sha256": "8057c0366effd89bbe89a07017a1dba65639c2755473df5e0ebaae58c9afc779"
+        },
+        "bundle/requirements.txt": {
+          "size": 354,
+          "sha256": "3fc16de8e59d89891eedce6778a79f2e49a7812e0b8e8cff99a24ec0e5439d37"
+        },
+        "bundle/training/examples/svm/plot_rbf_parameters.py": {
+          "size": 8393,
+          "sha256": "e6306ab99714f681cf93b5978459ed682ec116d594ddb64a68bf7a1ad8ec2eb9"
+        },
+        "bundle/training/pyproject.toml": {
+          "size": 14216,
+          "sha256": "9035b0add4bed5730748437b18713f35a392974bfa0d72cc4c9c2f59fc9cf7d4"
+        },
+        "invocation.json": {
+          "size": 996,
+          "sha256": "d20e60a05a030f913867553bba5d93dd87b4c44a1ce17a79f9f1d860beb3d636"
+        },
+        "result.json": {
+          "size": 2229,
+          "sha256": "901474056b90e7bfd52398028cd81c37fc235667d9be0d1f87c4b44d6d9195bf"
+        }
+      }
+    },
+    "sklearn_scaled_mlp": {
+      "family": "sklearn",
+      "source": "public",
+      "license_status": "documented_synthetic",
+      "license_evidence": "Saved final moons/Adam estimator and scaler; synthetic make_moons data; BSD-3-Clause upstream example.",
+      "artifact_path": "sklearn_scaled_mlp/bundle",
+      "dataset_directory": "sklearn_scaled_mlp",
+      "files": {
+        "bundle/MinMaxScaler.joblib": {
+          "size": 743,
+          "sha256": "15067a27da2269e81bc5f49e6be48138d363ca19edbdf7b93302f612ce59e1a6"
+        },
+        "bundle/model.joblib": {
+          "size": 25608,
+          "sha256": "d4b33309f80946046b472a3c75dd38703422b99f26550aa875186990e339a2e4"
+        },
+        "bundle/requirements.txt": {
+          "size": 354,
+          "sha256": "3fc16de8e59d89891eedce6778a79f2e49a7812e0b8e8cff99a24ec0e5439d37"
+        },
+        "bundle/training/examples/neural_networks/plot_mlp_training_curves.py": {
+          "size": 4147,
+          "sha256": "7c119cb024512137ad1148a35fcab16774d7ad9cf852ca6a925d6f4e5b35e271"
+        },
+        "bundle/training/pyproject.toml": {
+          "size": 14216,
+          "sha256": "9035b0add4bed5730748437b18713f35a392974bfa0d72cc4c9c2f59fc9cf7d4"
+        },
+        "invocation.json": {
+          "size": 1105,
+          "sha256": "69ec4f1c09875ba485fbbad7170c2caaa3c36f6a9e41365900a93c0477ca6199"
+        },
+        "result.json": {
+          "size": 2353,
+          "sha256": "4325838724c2cb1ed94caebf785279ca746bd425befa828b5d05ee582492a231"
+        }
+      }
+    },
+    "pytorch_polynomial": {
+      "family": "pytorch",
+      "source": "public",
+      "license_status": "documented_synthetic",
+      "license_evidence": "Synthetic polynomial samples; BSD-3-Clause tutorial.",
+      "artifact_path": "pytorch_polynomial",
+      "dataset_directory": "pytorch_polynomial",
+      "files": {
+        "artifact/polynomial_module.py": {
+          "size": 2358,
+          "sha256": "75f22bc886562a2efb5ac14b01019d833efe3ce4f3aa9936bf50981935af0b9e"
+        },
+        "artifact/requirements.txt": {
+          "size": 146,
+          "sha256": "0ea1a1e7a975391bcdb773832931ab94f1197038bf3fcab660c00f3df4e06ccb"
+        },
+        "artifact/weights.pt": {
+          "size": 2333,
+          "sha256": "9e34cb55e854ba71646b733272794cf0ef90e65da563542a242699185c50066a"
+        },
+        "independent-inputs.npz": {
+          "size": 1043,
+          "sha256": "de2cbc1342697077347761f7e87b904577d4b0ac086278e63d9af280f4e1f340"
+        },
+        "preparation.json": {
+          "size": 1231,
+          "sha256": "ecadc0f3bcfab71d6a3163b5584f5597694f6360f1f5182707105e184dd9c9c3"
+        },
+        "reference-model.pkl": {
+          "size": 4742,
+          "sha256": "f57843dc92363aa337e5066851ef1bb6dae86529a15982682dbb9c6d0515dc74"
+        },
+        "reference.json": {
+          "size": 32,
+          "sha256": "e8cb9fcf39098d4fa6750e5aef39a2a6ed06a611f3623c62a0d30625e9173653"
+        }
+      }
+    },
+    "pytorch_custom_network": {
+      "family": "pytorch",
+      "source": "public",
+      "license_status": "documented_synthetic",
+      "license_evidence": "Random synthetic tensors; MIT upstream example.",
+      "artifact_path": "pytorch_custom_network",
+      "dataset_directory": "pytorch_custom_network",
+      "files": {
+        "artifact/requirements.txt": {
+          "size": 146,
+          "sha256": "0ea1a1e7a975391bcdb773832931ab94f1197038bf3fcab660c00f3df4e06ccb"
+        },
+        "artifact/two_layer_net_module.py": {
+          "size": 1980,
+          "sha256": "d7634b2c14b71ac722b7ac9e125af9c69ce69c5385674f91bdbe2b81a9494dfc"
+        },
+        "artifact/weights.pt": {
+          "size": 406749,
+          "sha256": "658c93180d3fbfc1b931d54458da7c0aa5ff63f6ec557118de92d19377bc4f6d"
+        },
+        "independent-inputs.npz": {
+          "size": 948445,
+          "sha256": "ddf45abe899cc59098d1d2047dc5055b359a40796474b150dd91359e18a65a01"
+        },
+        "preparation.json": {
+          "size": 1223,
+          "sha256": "eefff1ead0407a6a229270c32ae92f4acc93ea8b8d45427305dc92efd2809010"
+        },
+        "reference-model.pkl": {
+          "size": 408492,
+          "sha256": "beee3938cd8f253ceeaabff9f8a80015301eff4f2cbb30299c5d352a182168d5"
+        },
+        "reference.json": {
+          "size": 32,
+          "sha256": "e8cb9fcf39098d4fa6750e5aef39a2a6ed06a611f3623c62a0d30625e9173653"
+        }
+      }
+    },
+    "pytorch_mnist_lstm": {
+      "family": "pytorch",
+      "source": "private",
+      "license_status": "needs_review",
+      "license_evidence": "See THIRD_PARTY_NOTICES.md and original case provenance; redistribution not cleared.",
+      "artifact_path": "pytorch_mnist_lstm",
+      "dataset_directory": "pytorch_mnist_lstm",
+      "files": {
+        "artifact/main.py": {
+          "size": 5658,
+          "sha256": "ebd462cfda1fc8ace2160e8a99e6f97125802e645f924c049ed5e63a0666b019"
+        },
+        "artifact/requirements.txt": {
+          "size": 146,
+          "sha256": "0ea1a1e7a975391bcdb773832931ab94f1197038bf3fcab660c00f3df4e06ccb"
+        },
+        "artifact/weights.pt": {
+          "size": 111292,
+          "sha256": "fd0576d8fcf9576e529c6ca71ec62a7d146e04d73629aa4083bb60358086113c"
+        },
+        "independent-inputs.npz": {
+          "size": 33739,
+          "sha256": "584e52fce3201a6348f3864692a731ad722dbfe2319f79c36d82336aaeba7c19"
+        },
+        "preparation.json": {
+          "size": 1193,
+          "sha256": "680e71e9f1029f5f522cc3cc3b3f74c59c3d80deaac4e359a2eb67507d8b1cfe"
+        },
+        "reference-model.pkl": {
+          "size": 115011,
+          "sha256": "8d7a1f5ee6a3ae3685bc0cc29b40c59b9855fd39baf5d3888991f0abbfb49abe"
+        },
+        "reference.json": {
+          "size": 32,
+          "sha256": "e8cb9fcf39098d4fa6750e5aef39a2a6ed06a611f3623c62a0d30625e9173653"
+        }
+      }
+    },
+    "pytorch_dcgan": {
+      "family": "pytorch",
+      "source": "public",
+      "license_status": "documented_synthetic",
+      "license_evidence": "Recorded --dataset fake run; BSD-3-Clause upstream example.",
+      "artifact_path": "pytorch_dcgan",
+      "dataset_directory": "pytorch_dcgan",
+      "files": {
+        "artifact/main.py": {
+          "size": 10653,
+          "sha256": "4f6aef3527822a32bcca366e336e941a67d04081f66f568cc24a0a642b5f9555"
+        },
+        "artifact/netG_epoch_0.pth": {
+          "size": 14322995,
+          "sha256": "ce71b50e5eab59aa033c70e3db98fed6d3c590d08e8f02443e38ab733d43d7d8"
+        },
+        "artifact/requirements.txt": {
+          "size": 146,
+          "sha256": "0ea1a1e7a975391bcdb773832931ab94f1197038bf3fcab660c00f3df4e06ccb"
+        },
+        "independent-inputs.npz": {
+          "size": 47672,
+          "sha256": "9b5a630d9a022f05cc6f30ec8b21c5e93e90cd264c6b5f573b6f9a4f0690a6f3"
+        },
+        "preparation.json": {
+          "size": 1222,
+          "sha256": "ad24db6c6f6c9f26bf244d048a12806345ad87dd5c36cb88a5d4274357343c16"
+        },
+        "reference-model.pkl": {
+          "size": 14328136,
+          "sha256": "3c5b144925248c7c8de50a404baa8dd0f3319d0ff4c58f6ee3c4eb7c4734e2b9"
+        },
+        "reference.json": {
+          "size": 32,
+          "sha256": "e8cb9fcf39098d4fa6750e5aef39a2a6ed06a611f3623c62a0d30625e9173653"
+        }
+      }
+    },
+    "huggingface_classification": {
+      "family": "transformers",
+      "source": "private",
+      "license_status": "needs_review",
+      "license_evidence": "See THIRD_PARTY_NOTICES.md and original case provenance; redistribution not cleared.",
+      "artifact_path": "huggingface_classification/bundle",
+      "dataset_directory": "huggingface_classification",
+      "files": {
+        "base-model.json": {
+          "size": 403,
+          "sha256": "a9aab96f1627893eefbb7e9b0eb16bdd5270918bcd98d97321095b3e41722660"
+        },
+        "bundle/config.json": {
+          "size": 730,
+          "sha256": "ceed6cbf7b3b03ea90e7d0638cae654a175dbd967b0649e9efb5e3e6344ac3cd"
+        },
+        "bundle/model.safetensors": {
+          "size": 17549312,
+          "sha256": "b97ec2c541d9c7e6d17c4f10d54d903eb588cf7f7f7609e575d4decdfe0bf652"
+        },
+        "bundle/requirements.txt": {
+          "size": 938,
+          "sha256": "bc4ac5afbe18de2024bdc42df919cf6dfd2337a8df69b0e8f092276769267c8d"
+        },
+        "bundle/special_tokens_map.json": {
+          "size": 125,
+          "sha256": "b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3"
+        },
+        "bundle/tokenizer.json": {
+          "size": 711661,
+          "sha256": "da0e79933b9ed51798a3ae27893d3c5fa4a201126cef75586296df9b4d2c62a0"
+        },
+        "bundle/tokenizer_config.json": {
+          "size": 1300,
+          "sha256": "e711904cac23112776b678356ccf702cf934babaa01125f698ac43bf9ad38e73"
+        },
+        "bundle/training/examples/pytorch/text-classification/requirements.txt": {
+          "size": 112,
+          "sha256": "2795f3a1b5426dc38ad5ecda8f9c6517c1c15f4c4034a8b3aa8d5cebfdbdb7eb"
+        },
+        "bundle/training/examples/pytorch/text-classification/run_glue.py": {
+          "size": 28482,
+          "sha256": "38187d785b2bb2889e75905d42f88daacf94b450b6df4c3a50ef05d622db2dad"
+        },
+        "bundle/training/pyproject.toml": {
+          "size": 2591,
+          "sha256": "f4aaf3d6c05f5178776d8af8c098d7f3b9eea9c25e13884ed890bca38697345a"
+        },
+        "bundle/training/setup.py": {
+          "size": 18156,
+          "sha256": "3280fde7567deb6eeb0b2fb3609058c0109498e0c9a334ed69f45ecea0d6c38e"
+        },
+        "bundle/vocab.txt": {
+          "size": 231508,
+          "sha256": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"
+        },
+        "invocation.json": {
+          "size": 2492,
+          "sha256": "68b796546e7ff62923d3a310e721dcf0e3ae0d2b44b843166c07f46635fc7170"
+        },
+        "result.json": {
+          "size": 3985,
+          "sha256": "dfa5a7861040d280e623cb51dd1f2c0f9ecd748607d5ee5bece5ea9b0f48ab9a"
+        }
+      }
+    },
+    "huggingface_ner": {
+      "family": "transformers",
+      "source": "private",
+      "license_status": "needs_review",
+      "license_evidence": "See THIRD_PARTY_NOTICES.md and original case provenance; redistribution not cleared.",
+      "artifact_path": "huggingface_ner/bundle",
+      "dataset_directory": "huggingface_ner",
+      "files": {
+        "base-model.json": {
+          "size": 403,
+          "sha256": "a9aab96f1627893eefbb7e9b0eb16bdd5270918bcd98d97321095b3e41722660"
+        },
+        "bundle/config.json": {
+          "size": 961,
+          "sha256": "b75d960cf6b127760e10cf4834855fbdc18284bfc035272b1a7ddedb0d43a913"
+        },
+        "bundle/model.safetensors": {
+          "size": 17486692,
+          "sha256": "63ded28e7b299632e8e88fba65c3ed4286591fffa2242455e81af077b6aaa1c2"
+        },
+        "bundle/requirements.txt": {
+          "size": 938,
+          "sha256": "bc4ac5afbe18de2024bdc42df919cf6dfd2337a8df69b0e8f092276769267c8d"
+        },
+        "bundle/special_tokens_map.json": {
+          "size": 125,
+          "sha256": "b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3"
+        },
+        "bundle/tokenizer.json": {
+          "size": 711494,
+          "sha256": "79ea220416a57ca8acdf069d71875d5d2ddadef66021aeb6c120a7c546c04344"
+        },
+        "bundle/tokenizer_config.json": {
+          "size": 1300,
+          "sha256": "e711904cac23112776b678356ccf702cf934babaa01125f698ac43bf9ad38e73"
+        },
+        "bundle/training/examples/pytorch/token-classification/requirements.txt": {
+          "size": 68,
+          "sha256": "15dfd5ac882103475dd7955e89156b4c21a33c218f4ae52c08a739a554bbd7a2"
+        },
+        "bundle/training/examples/pytorch/token-classification/run_ner.py": {
+          "size": 27533,
+          "sha256": "6b8a39ae5241a60d156cf7bc066a6e8cd3b5ac00d084b3b7c9f70c983ea0f9cf"
+        },
+        "bundle/training/pyproject.toml": {
+          "size": 2591,
+          "sha256": "f4aaf3d6c05f5178776d8af8c098d7f3b9eea9c25e13884ed890bca38697345a"
+        },
+        "bundle/training/setup.py": {
+          "size": 18156,
+          "sha256": "3280fde7567deb6eeb0b2fb3609058c0109498e0c9a334ed69f45ecea0d6c38e"
+        },
+        "bundle/vocab.txt": {
+          "size": 231508,
+          "sha256": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"
+        },
+        "invocation.json": {
+          "size": 3083,
+          "sha256": "cb164dbd5aeecec882163762155abda649a29c839bb4095367ee768b9eb209a4"
+        },
+        "result.json": {
+          "size": 4438,
+          "sha256": "c286625ad408e11812eaf5b7b442462d64f4d45e25002e2e5a6f3f60ccc18508"
+        }
+      }
+    },
+    "huggingface_question_answering": {
+      "family": "transformers",
+      "source": "private",
+      "license_status": "needs_review",
+      "license_evidence": "See THIRD_PARTY_NOTICES.md and original case provenance; redistribution not cleared.",
+      "artifact_path": "huggingface_question_answering/bundle",
+      "dataset_directory": "huggingface_question_answering",
+      "files": {
+        "base-model.json": {
+          "size": 403,
+          "sha256": "a9aab96f1627893eefbb7e9b0eb16bdd5270918bcd98d97321095b3e41722660"
+        },
+        "bundle/config.json": {
+          "size": 589,
+          "sha256": "344849aa42aa6eb8909781d724719980bb98ee12c565b2e6470cd3136c2d3345"
+        },
+        "bundle/model.safetensors": {
+          "size": 17483080,
+          "sha256": "c259145425339bec96408d091a5a0aaf233c82b85f3f06734b09aa89ad2e3a65"
+        },
+        "bundle/requirements.txt": {
+          "size": 938,
+          "sha256": "bc4ac5afbe18de2024bdc42df919cf6dfd2337a8df69b0e8f092276769267c8d"
+        },
+        "bundle/special_tokens_map.json": {
+          "size": 125,
+          "sha256": "b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3"
+        },
+        "bundle/tokenizer.json": {
+          "size": 711660,
+          "sha256": "b471fe70e2857943fdcb96b7e2dd17d18fd3cbf2e515901fcebe5b81777b20df"
+        },
+        "bundle/tokenizer_config.json": {
+          "size": 1300,
+          "sha256": "e711904cac23112776b678356ccf702cf934babaa01125f698ac43bf9ad38e73"
+        },
+        "bundle/training/examples/pytorch/question-answering/requirements.txt": {
+          "size": 62,
+          "sha256": "d22f1a3e98228016b8c23b90ca9a398d9c051e8205cd5648960d636908c24bb6"
+        },
+        "bundle/training/examples/pytorch/question-answering/run_qa.py": {
+          "size": 32640,
+          "sha256": "45fa7eb1c4f4feb850d08758d024f015f782297e5111e0857b52ed2de6f2f354"
+        },
+        "bundle/training/examples/pytorch/question-answering/trainer_qa.py": {
+          "size": 6221,
+          "sha256": "73bb517b25cdd752f8cad292ca3cdf40f319e4580abb899d976dca38299483ab"
+        },
+        "bundle/training/examples/pytorch/question-answering/utils_qa.py": {
+          "size": 22738,
+          "sha256": "e97b71070579835b53d1eed571e65d8bb43a9bb6f5021c9d4b3e0a452207bb28"
+        },
+        "bundle/training/pyproject.toml": {
+          "size": 2591,
+          "sha256": "f4aaf3d6c05f5178776d8af8c098d7f3b9eea9c25e13884ed890bca38697345a"
+        },
+        "bundle/training/setup.py": {
+          "size": 18156,
+          "sha256": "3280fde7567deb6eeb0b2fb3609058c0109498e0c9a334ed69f45ecea0d6c38e"
+        },
+        "bundle/vocab.txt": {
+          "size": 231508,
+          "sha256": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"
+        },
+        "invocation.json": {
+          "size": 2824,
+          "sha256": "9badfd25397113e83a3f159f1ee16d176ef6541cd24fa9c9ad4e5bc6902fadce"
+        },
+        "result.json": {
+          "size": 4590,
+          "sha256": "9cdcb4649219cf4402f203cc78ce0cdde005196adf59e5e9c0a0bf0b5ade68b5"
+        }
+      }
+    },
+    "huggingface_generation": {
+      "family": "transformers",
+      "source": "private",
+      "license_status": "needs_review",
+      "license_evidence": "See THIRD_PARTY_NOTICES.md and original case provenance; redistribution not cleared.",
+      "artifact_path": "huggingface_generation/bundle",
+      "dataset_directory": "huggingface_generation",
+      "files": {
+        "base-model.json": {
+          "size": 876,
+          "sha256": "b67118323de7b7b36a520146a75e081a5c7d4345b9357703f15ab931631e03c5"
+        },
+        "bundle/chat_template.jinja": {
+          "size": 368,
+          "sha256": "872be49dbb638044ad01b60388f48d469ff2980e5f0dccdc22ec907db54d0788"
+        },
+        "bundle/config.json": {
+          "size": 872,
+          "sha256": "f026c3f75366237ef213593822dc4406008a01e255e74a109d9d71a0d90dcb4e"
+        },
+        "bundle/generation_config.json": {
+          "size": 142,
+          "sha256": "f38cb9f53c0308d869b69a38938ef586e28c12e7ccb3177e061fb4dc4057b8b4"
+        },
+        "bundle/merges.txt": {
+          "size": 466391,
+          "sha256": "0b54e8aa4e53d5383e2e4bc635a56b43f9647f7b13832d5d9ecd8f82dac4f510"
+        },
+        "bundle/model.safetensors": {
+          "size": 538090408,
+          "sha256": "901f402c4d59d0eedcae1d28e44f6a7962868f52e30ba0ab54838811c3197df6"
+        },
+        "bundle/requirements.txt": {
+          "size": 963,
+          "sha256": "273e33b0767a7904f1aa5ca66f3eb99e889b397de4b3c97a7560321c2fc1f7df"
+        },
+        "bundle/special_tokens_map.json": {
+          "size": 655,
+          "sha256": "2b7379f3ae813529281a5c602bc5a11c1d4e0a99107aaa597fe936c1e813ca52"
+        },
+        "bundle/tokenizer.json": {
+          "size": 3522656,
+          "sha256": "7d27c493c729a66ecefc837280b05d948b1ed50d130eebdbf911b1b36cf38ed7"
+        },
+        "bundle/tokenizer_config.json": {
+          "size": 3398,
+          "sha256": "5dbff37e2d5899f5f69d86116f80733e11a790f703fd59855e2aef5717533ac5"
+        },
+        "bundle/training/pyproject.toml": {
+          "size": 3557,
+          "sha256": "fd61d42479b9590b89c3ca5890db08109bed8f4a72f332aec4e811a624860307"
+        },
+        "bundle/training/requirements.txt": {
+          "size": 54,
+          "sha256": "4d462a7ea1a983f8cdcc20a3ed2e1dade32e618fb80acb8fc81eb62937bd2277"
+        },
+        "bundle/training/trl/scripts/sft.py": {
+          "size": 6093,
+          "sha256": "78dc9057b735b72bab9b37faaa37ee2cbe9cafe36d38943cc1869811119ad2c0"
+        },
+        "bundle/vocab.json": {
+          "size": 800662,
+          "sha256": "82b84012e3add4d01d12ba14442026e49b8cbbaead1f79ecf3d919784f82dc79"
+        },
+        "invocation.json": {
+          "size": 2954,
+          "sha256": "f8e8614c3e9ab3d6707339bf925fe08c14035fba2c1c74e3a82bd57a73305251"
+        },
+        "result.json": {
+          "size": 4264,
+          "sha256": "fc05c88bcc4bf01a653b9ada1c1d319d5a034b3a571397d1c70eb450fd8adf68"
+        }
+      }
+    },
+    "huggingface_custom": {
+      "family": "transformers",
+      "source": "private",
+      "license_status": "needs_review",
+      "license_evidence": "See THIRD_PARTY_NOTICES.md and original case provenance; redistribution not cleared.",
+      "artifact_path": "huggingface_custom/bundle",
+      "dataset_directory": "huggingface_custom",
+      "files": {
+        "provenance.json": {
+          "size": 280,
+          "sha256": "2dbe6b069fe6e68deabf49ed6887936d422762090cd32841477fc2cb497a589a"
+        },
+        "bundle/model.safetensors": {
+          "size": 17549312,
+          "sha256": "b97ec2c541d9c7e6d17c4f10d54d903eb588cf7f7f7609e575d4decdfe0bf652"
+        },
+        "bundle/special_tokens_map.json": {
+          "size": 125,
+          "sha256": "b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3"
+        },
+        "bundle/modeling_custom.py": {
+          "size": 1593,
+          "sha256": "9cc23cb14a48759acf6c3ee9786623a0c6055c7faac4b9fe3261fe42202402e6"
+        },
+        "bundle/configuration_custom.py": {
+          "size": 446,
+          "sha256": "a3ab48d791f4f7132a2efd2faaa73033a18de1033f4ec78094718918c8b2431d"
+        },
+        "bundle/tokenizer_config.json": {
+          "size": 1300,
+          "sha256": "e711904cac23112776b678356ccf702cf934babaa01125f698ac43bf9ad38e73"
+        },
+        "bundle/requirements.txt": {
+          "size": 938,
+          "sha256": "bc4ac5afbe18de2024bdc42df919cf6dfd2337a8df69b0e8f092276769267c8d"
+        },
+        "bundle/vocab.txt": {
+          "size": 231508,
+          "sha256": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"
+        },
+        "bundle/config.json": {
+          "size": 959,
+          "sha256": "3714d1e2cf90c0b71e4f28347a8759333e46e45d2a3ea4f6b7c3ba384e8476ce"
+        },
+        "bundle/tokenizer.json": {
+          "size": 711661,
+          "sha256": "da0e79933b9ed51798a3ae27893d3c5fa4a201126cef75586296df9b4d2c62a0"
+        }
+      }
+    }
+  }
+}

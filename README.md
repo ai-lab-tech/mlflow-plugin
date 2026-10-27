@@ -145,9 +145,11 @@ additional integration. GPU configuration is not proof of GPU validation. Read t
 
 ## Run the examples
 
-The repository includes **13 saved-model cases**: four sklearn, four PyTorch and
-five Hugging Face, including custom architectures. Retrieve weights with Git LFS
-only when needed, then select a writable output location:
+The shared catalog tracks **13 saved-model cases**. Five cases using synthetic
+training data are included here; eight cases pending license review live in the
+private test-data repository. See [data setup](examples/data/README.md) for preparing
+a combined local dataset. To run the public fixtures, retrieve their weights and
+select a writable output location:
 
 ```bash
 git lfs install --local

@@ -2,7 +2,9 @@
 
 These examples exercise the new `sklearn.log_model`, `pytorch.log_model` and
 `transformers.log_model` wrappers with mandatory `input_example` requests.
-They use the trained artifacts committed in this repository under `examples/data`.
+They use a shared 13-case catalog: five synthetic-data fixtures in this repository
+and eight fixtures in a private repository pending license review. See
+[data setup](data/README.md) to prepare a combined local dataset.
 Binary artifacts are tracked with Git LFS; see [data provenance](data/README.md).
 They do not train, download models, import training scripts, read benchmark request
 fixtures or expected answers, or use an LLM. The full runner below starts Triton for validation.
@@ -32,10 +34,9 @@ git lfs install --local
 git lfs pull
 ```
 
-Both runners default to this checkout's `examples/data`; `--data-root` is only
-needed to override that location. An alternative data root must use the same
-`<case-name>/` layout. All 13 cases, including custom models, are direct children
-of this single data directory. No sibling generator repository is required.
+Both runners default to `MLFLOW_TRITON_DATA_ROOT` when set, otherwise this
+checkout's public `examples/data`. Use `--data-root` for a prepared combined dataset. An alternative data root must use the same
+`<case-name>/` layout. Prepared cases are direct children of the chosen data directory. No sibling generator repository is required.
 Docker must be running. From the repository root:
 
 ```bash
@@ -192,10 +193,10 @@ are retained with the run. Docker serving scratch uses Docker's data disk.
 ## Select CPU or GPU serving
 
 ```bash
-# Default: all thirteen cases on CPU
+# All available cases on CPU (13 with the combined dataset)
 python examples/run_real_models.py --device cpu
 
-# GPU: four PyTorch and five Hugging Face cases
+# Available GPU cases (4 PyTorch + 5 Hugging Face with the combined dataset)
 python examples/run_real_models.py --device gpu
 
 # One GPU case
@@ -203,8 +204,8 @@ python examples/run_real_models.py --device gpu --case huggingface_generation
 ```
 
 `--device` defaults to `cpu` and is forwarded to the public `log_model` wrappers.
-Selecting GPU without case/family filters selects the nine GPU-capable framework
-examples. Explicitly selecting sklearn with GPU is an error; it never silently
+Selecting GPU without case/family filters selects available GPU-capable framework
+examples. Set `MLFLOW_TRITON_DATA_ROOT` or pass `--data-root` for private cases. Explicitly selecting sklearn with GPU is an error; it never silently
 runs sklearn on CPU in a GPU report.
 
 GPU runs require an NVIDIA GPU, a compatible driver and Docker GPU support.

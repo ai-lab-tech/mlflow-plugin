@@ -17,17 +17,18 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 
 from build_triton_runtime import build_image, dockerfile  # noqa: E402 - disable bytecode writes before importing local modules
+from data_catalog import select_cases  # noqa: E402
 from real_models import CASES, DEFAULT_DATA_ROOT  # noqa: E402 - disable bytecode writes before importing local modules
 from serving_validation import validate_serving  # noqa: E402 - disable bytecode writes before importing local modules
 
 GROUPS = {
     "sklearn": (
         "python:3.11-slim",
-        "sklearn_mixed_columns/bundle/requirements.txt",
+        "sklearn_gradient_boosting/bundle/requirements.txt",
     ),
     "pytorch": (
         "python:3.14-slim",
-        "pytorch_mnist_lstm/artifact/requirements.txt",
+        "pytorch_polynomial/artifact/requirements.txt",
     ),
     "transformers": (
         "python:3.11-slim",
@@ -54,6 +55,19 @@ DEPENDENCIES = {
 def runtime_requirements(data, family, device="cpu"):
     """Use saved inference versions; exclude unrelated training-only packages."""
     source = data / GROUPS[family][1]
+    if not source.is_file():
+        candidates = [
+            data
+            / relative
+            / (
+                "artifact/requirements.txt"
+                if family == "pytorch"
+                else "requirements.txt"
+            )
+            for kind, relative in CASES.values()
+            if kind == family
+        ]
+        source = next((path for path in candidates if path.is_file()), source)
     lines = source.read_text().splitlines()
     pins = {
         line.split("==", 1)[0]: line
@@ -119,7 +133,7 @@ def main():
         "--data-root",
         type=Path,
         default=DEFAULT_DATA_ROOT,
-        help="Saved artifacts; default: examples/data in this checkout",
+        help="Saved artifacts; defaults to MLFLOW_TRITON_DATA_ROOT or public examples/data",
     )
     destinations = parser.add_mutually_exclusive_group()
     destinations.add_argument(
@@ -173,19 +187,10 @@ def main():
     except (ValueError, OSError) as error:
         parser.error(str(error))
     plugin = Path(__file__).resolve().parents[1]
-    requested = list(dict.fromkeys(args.case or CASES))
-    if args.family:
-        requested = [name for name in requested if CASES[name][0] in args.family]
-    if args.device == "gpu":
-        if (args.case or args.family) and any(
-            CASES[name][0] == "sklearn" for name in requested
-        ):
-            parser.error(
-                "sklearn supports CPU only; select PyTorch/Hugging Face for --device gpu"
-            )
-        requested = [name for name in requested if CASES[name][0] != "sklearn"]
-    if not requested:
-        parser.error("No cases match --case and --family")
+    try:
+        requested = select_cases(data, args.case, args.family, args.device)
+    except ValueError as error:
+        parser.error(str(error))
     families = list(dict.fromkeys(CASES[name][0] for name in requested))
     images = json.loads(args.triton_images.read_text()) if args.triton_images else {}
     for family in families:

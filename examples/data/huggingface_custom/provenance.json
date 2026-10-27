@@ -1,5 +1,0 @@
-{
-  "source_artifact": "trained21/hf_glue/bundle",
-  "weights": "Copied unchanged; no training or model download",
-  "custom_code": "Local integration fixture with logits divided by configured temperature; not an accuracy improvement or an upstream custom-trained architecture"
-}
