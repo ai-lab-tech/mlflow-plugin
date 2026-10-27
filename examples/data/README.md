@@ -1,4 +1,4 @@
-# Saved test artifacts
+# Test dataset
 
 This directory contains the data for all 13 cases in `../real_models.py`:
 four sklearn, four PyTorch and five Hugging Face examples. The original twelve
@@ -11,7 +11,14 @@ Binary weights, serialized architectures and NumPy fixtures are tracked by Git L
 After cloning, run `git lfs install --local` and `git lfs pull` from the repository
 root. The checkout contains about 600 MiB of test data.
 
-`manifest.json` lists the case paths, file sizes and SHA-256 checksums. Existing
+All cases live directly under `examples/data/<case-name>/`, using the same names
+as `--case` in the runner. There are no historical batch directories or separate
+custom-model dataset. sklearn/Hugging Face assets are in each case's `bundle/`;
+PyTorch cases retain their `artifact/` and saved architecture files.
+
+`manifest.json` lists current `dataset_directory` and `artifact_path` values,
+file sizes and SHA-256 checksums. `source_directory` records the original source
+location for provenance; it is not a path used by the runner. Existing
 provenance, dependency files, tokenizer assets and original training sources are
 preserved. Historical absolute paths in provenance describe the original runs;
 the example runner uses repository-relative paths, not those historical paths.

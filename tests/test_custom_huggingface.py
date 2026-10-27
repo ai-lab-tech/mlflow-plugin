@@ -39,7 +39,7 @@ class CustomHuggingFaceTests(unittest.TestCase):
 
         fixture = (
             Path(__file__).resolve().parents[1]
-            / "examples/data/custom/huggingface_custom/bundle"
+            / "examples/data/huggingface_custom/bundle"
         )
         with (
             tempfile.TemporaryDirectory() as tmp,

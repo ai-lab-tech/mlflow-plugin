@@ -12,22 +12,22 @@ DEFAULT_DATA_ROOT = Path(__file__).resolve().parent / "data"
 
 # Paths are relative to the repository-local examples/data directory.
 CASES = {
-    "sklearn_mixed_columns": ("sklearn", "trained21/sk_mixed_columns/bundle"),
+    "sklearn_mixed_columns": ("sklearn", "sklearn_mixed_columns/bundle"),
     "sklearn_gradient_boosting": (
         "sklearn",
-        "trained21/sk_boosting_regularization/bundle",
+        "sklearn_gradient_boosting/bundle",
     ),
-    "sklearn_scaled_svm": ("sklearn", "trained21/sk_rbf_parameters/bundle"),
-    "sklearn_scaled_mlp": ("sklearn", "trained21/sk_mlp_training_curves/bundle"),
-    "pytorch_polynomial": ("pytorch", "legacy59/results/pytorch_255f3533e1"),
-    "pytorch_custom_network": ("pytorch", "legacy59/results/pytorch_af4f245f66"),
-    "pytorch_mnist_lstm": ("pytorch", "legacy59/results/pytorch_cac1a3dc99"),
-    "pytorch_dcgan": ("pytorch", "legacy59/results/pytorch_7949f069ef"),
-    "huggingface_custom": ("transformers", "custom/huggingface_custom/bundle"),
-    "huggingface_classification": ("transformers", "trained21/hf_glue/bundle"),
-    "huggingface_ner": ("transformers", "trained21/hf_ner/bundle"),
-    "huggingface_question_answering": ("transformers", "trained21/hf_qa/bundle"),
-    "huggingface_generation": ("transformers", "trained21/llm_sft/bundle"),
+    "sklearn_scaled_svm": ("sklearn", "sklearn_scaled_svm/bundle"),
+    "sklearn_scaled_mlp": ("sklearn", "sklearn_scaled_mlp/bundle"),
+    "pytorch_polynomial": ("pytorch", "pytorch_polynomial"),
+    "pytorch_custom_network": ("pytorch", "pytorch_custom_network"),
+    "pytorch_mnist_lstm": ("pytorch", "pytorch_mnist_lstm"),
+    "pytorch_dcgan": ("pytorch", "pytorch_dcgan"),
+    "huggingface_custom": ("transformers", "huggingface_custom/bundle"),
+    "huggingface_classification": ("transformers", "huggingface_classification/bundle"),
+    "huggingface_ner": ("transformers", "huggingface_ner/bundle"),
+    "huggingface_question_answering": ("transformers", "huggingface_question_answering/bundle"),
+    "huggingface_generation": ("transformers", "huggingface_generation/bundle"),
 }
 
 

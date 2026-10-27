@@ -1,4 +1,4 @@
-# Saved-model examples: twelve original cases plus custom Hugging Face
+# Saved-model examples: 13-case test dataset
 
 These examples exercise the new `sklearn.log_model`, `pytorch.log_model` and
 `transformers.log_model` wrappers with mandatory `input_example` requests.
@@ -33,7 +33,9 @@ git lfs pull
 ```
 
 Both runners default to this checkout's `examples/data`; `--data-root` is only
-needed to override that location. No sibling generator repository is required.
+needed to override that location. An alternative data root must use the same
+`<case-name>/` layout. All 13 cases, including custom models, are direct children
+of this single data directory. No sibling generator repository is required.
 Docker must be running. From any working directory:
 
 ```bash

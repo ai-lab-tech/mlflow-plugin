@@ -23,13 +23,13 @@ from serving_validation import validate_serving  # noqa: E402 - disable bytecode
 GROUPS = {
     "sklearn": (
         "python:3.11-slim",
-        "trained21/sk_mixed_columns/bundle/requirements.txt",
+        "sklearn_mixed_columns/bundle/requirements.txt",
     ),
     "pytorch": (
         "python:3.14-slim",
-        "legacy59/results/pytorch_cac1a3dc99/artifact/requirements.txt",
+        "pytorch_mnist_lstm/artifact/requirements.txt",
     ),
-    "transformers": ("python:3.11-slim", "trained21/hf_glue/bundle/requirements.txt"),
+    "transformers": ("python:3.11-slim", "huggingface_classification/bundle/requirements.txt"),
 }
 DEPENDENCIES = {
     "sklearn": {"numpy", "pandas", "scipy", "scikit-learn", "joblib"},
