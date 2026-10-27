@@ -1,4 +1,4 @@
-# Twelve real saved-model examples
+# Saved-model examples: twelve original cases plus custom Hugging Face
 
 These examples exercise the new `sklearn.log_model`, `pytorch.log_model` and
 `transformers.log_model` wrappers with mandatory `input_example` requests.
@@ -17,12 +17,13 @@ fixtures or expected answers, or use an LLM. The full runner below starts Triton
 | PyTorch | `pytorch_custom_network` | Saved custom TwoLayerNet architecture and state_dict |
 | PyTorch | `pytorch_mnist_lstm` | Image tensor, recurrent network and saved weights |
 | PyTorch | `pytorch_dcgan` | Latent tensor to image tensor, saved generator weights |
+| Hugging Face | `huggingface_custom` | Own configuration/model classes; saved BERT weights with custom inference behavior |
 | Hugging Face | `huggingface_classification` | Local BERT sequence classification and tokenizer |
 | Hugging Face | `huggingface_ner` | Local BERT token classification and tokenizer |
 | Hugging Face | `huggingface_question_answering` | Local BERT, question/context inputs and tokenizer |
 | Hugging Face | `huggingface_generation` | Local SFT causal LM, tokenizer and deterministic eight-token generation |
 
-## Run all twelve, including real Triton serving
+## Run all examples, including real Triton serving
 
 After cloning, retrieve the tracked binary artifacts once from the repository root:
 
@@ -77,7 +78,7 @@ all families. The old benchmark map containing only 3.7/3.10 is insufficient.
 The server checks both the actual interpreter version and linked backend stub.
 
 Three isolated packaging containers install saved inference dependency versions
-and MLflow 3.17.2, then run four cases each. Python 3.14 preserves the producer
+and MLflow 3.17.2, then run four sklearn, four PyTorch and five Hugging Face cases. Python 3.14 preserves the producer
 version of the saved custom PyTorch classes. HF additionally installs the matching
 CPU torchvision 0.24.0 for torch 2.9.0. sklearn explicitly uses CloudPickle for
 these trusted, already-deserialized Python pipelines; PyTorch uses MLflow's
@@ -189,10 +190,10 @@ are retained with the run. Docker serving scratch uses Docker's data disk.
 ## Select CPU or GPU serving
 
 ```bash
-# Default: all twelve cases on CPU
+# Default: all thirteen cases on CPU
 python examples/run_real_models.py --device cpu
 
-# GPU: four PyTorch and four Hugging Face cases
+# GPU: four PyTorch and five Hugging Face cases
 python examples/run_real_models.py --device gpu
 
 # One GPU case
@@ -200,7 +201,7 @@ python examples/run_real_models.py --device gpu --case huggingface_generation
 ```
 
 `--device` defaults to `cpu` and is forwarded to the public `log_model` wrappers.
-Selecting GPU without case/family filters selects the eight GPU-capable framework
+Selecting GPU without case/family filters selects the nine GPU-capable framework
 examples. Explicitly selecting sklearn with GPU is an error; it never silently
 runs sklearn on CPU in a GPU report.
 
@@ -215,9 +216,73 @@ Missing GPU access or incompatible CUDA dependencies fail clearly.
 
 Logging and native reference predictions still run on CPU. Triton receives
 `KIND_GPU` configuration and Docker GPU access; the client also verifies Triton's
-reported instance kind. Response comparisons use the same CPU reference fixtures
-and unchanged tolerances as CPU runs. GPU runs use the first CUDA-visible GPU.
+reported instance kind. GPU serving is compared with a separate native GPU prediction; CPU/GPU
+differences remain separate diagnostics. All comparisons retain the same tolerances. GPU runs use the first CUDA-visible GPU.
 Each case records `device` in the report, with GPU preflight details in `gpu.log`.
 No GPU inference result has been established by these code/unit-test changes;
-run the command above to measure it. GPU numerical differences remain failures
-rather than automatically relaxing comparison criteria.
+run the command above to measure it. Triton/native-GPU differences remain serving failures. CPU/GPU differences
+are recorded separately; the tolerances are never automatically relaxed.
+
+## Native GPU reference and CPU/GPU differences
+
+GPU runs now load the same saved MLflow artifact on `cuda:0` in a separate process,
+perform prediction through MLflow directly, and exit before Triton starts. The
+reference reuses tensor/schema conversion helpers, but never calls Triton's model
+`initialize()` or `execute()`. It uses the same request and dependency environment.
+
+The report distinguishes:
+
+- `triton_vs_native_gpu`: primary serving comparison on the same device.
+- `native_gpu_vs_cpu`: numerical differences between native GPU and the original CPU reference.
+- `triton_vs_cpu`: original cross-device serving comparison, still reported.
+
+`triton_validation` for a GPU run now means **Triton versus native GPU**, identified
+by `comparison: saved_native_artifact_gpu`. A CPU/GPU mismatch does not change
+that serving result, but remains explicitly `failed` in its diagnostic entry.
+Earlier reports are untouched and used CPU reference predictions for GPU serving.
+CPU tests continue to compare Triton with the CPU reference.
+
+All checks keep `rtol=1e-5`, `atol=1e-6`, and `equal_nan=True`. Numeric diagnostics
+include mismatched element counts and the largest absolute difference among finite
+values. Details are retained in `triton/<case>/comparison-details.json` and the
+combined report; native reference logs are in `native-gpu.log`.
+
+Retest only DCGAN, preserving all earlier results:
+
+```bash
+python examples/run_real_models.py --device gpu --case pytorch_dcgan \
+  --output-root /mnt/container-data/mlflow-tests
+```
+
+## Hugging Face with custom Python code
+
+`huggingface_custom` is an additional (13th) example. It provides its own
+`CustomBertConfig` in `configuration_custom.py` and
+`CustomBertForSequenceClassification` in `modeling_custom.py`. The custom forward
+method divides logits by a configurable temperature (1.7), so loading the standard
+BERT implementation instead would change the predictions.
+
+The weights and tokenizer are copied unchanged from the existing locally
+fine-tuned `hf_glue` checkpoint. No training or download was performed for this
+example. The temperature is an integration-test setting, not a fitted calibration
+or an accuracy improvement. Provenance is stored alongside the bundle.
+
+The local config supplies `auto_map`; the example explicitly loads this reviewed
+local code with `trust_remote_code=True` and `local_files_only=True`. It then calls
+the public `transformers.log_model(..., input_example=..., device=...)` wrapper.
+MLflow packages the registered custom source files together with the model.
+
+```bash
+python examples/run_real_models.py --case huggingface_custom --device cpu \
+  --output-root /mnt/container-data/mlflow-tests
+
+python examples/run_real_models.py --case huggingface_custom --device gpu \
+  --output-root /mnt/container-data/mlflow-tests
+```
+
+Local packaging passed. A regression test uses tiny synthetic weights to verify
+the custom behavior, reloads the packaged artifact in a fresh process with the
+original source removed and a fresh HF module cache, and verifies that deleting
+the packaged architecture file causes a failure. Actual CPU/GPU Triton execution
+for this new example remains to be run; the prior twelve passing cases do not
+count as validation of this additional case.

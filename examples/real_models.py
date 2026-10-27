@@ -1,4 +1,4 @@
-"""Twelve saved-model examples. No training, downloads or live Triton calls."""
+"""Saved-model examples. No training, downloads or live Triton calls."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ CASES = {
     "pytorch_custom_network": ("pytorch", "legacy59/results/pytorch_af4f245f66"),
     "pytorch_mnist_lstm": ("pytorch", "legacy59/results/pytorch_cac1a3dc99"),
     "pytorch_dcgan": ("pytorch", "legacy59/results/pytorch_7949f069ef"),
+    "huggingface_custom": ("transformers", "custom/huggingface_custom/bundle"),
     "huggingface_classification": ("transformers", "trained21/hf_glue/bundle"),
     "huggingface_ner": ("transformers", "trained21/hf_ner/bundle"),
     "huggingface_question_answering": ("transformers", "trained21/hf_qa/bundle"),
@@ -47,7 +48,11 @@ def load_example(name, data_root):
 
         requirements = (path / "requirements.txt").read_text().splitlines()
         saved_version = next(
-            (line.split("==", 1)[1] for line in requirements if line.startswith("scikit-learn==")),
+            (
+                line.split("==", 1)[1]
+                for line in requirements
+                if line.startswith("scikit-learn==")
+            ),
             None,
         )
         if saved_version and sklearn.__version__ != saved_version:
@@ -72,7 +77,11 @@ def load_example(name, data_root):
         elif name == "sklearn_gradient_boosting":
             example = np.linspace(-1.0, 1.0, 20).reshape(2, 10)
         else:
-            scaler_file = "StandardScaler.joblib" if name == "sklearn_scaled_svm" else "MinMaxScaler.joblib"
+            scaler_file = (
+                "StandardScaler.joblib"
+                if name == "sklearn_scaled_svm"
+                else "MinMaxScaler.joblib"
+            )
             # Compose already fitted components; never call fit().
             model = Pipeline(
                 [
@@ -90,19 +99,25 @@ def load_example(name, data_root):
         with (path / "reference-model.pkl").open("rb") as stream:
             model = cloudpickle.load(stream)
         filename = "netG_epoch_0.pth" if name == "pytorch_dcgan" else "weights.pt"
-        state = torch.load(path / "artifact" / filename, map_location="cpu", weights_only=True)
+        state = torch.load(
+            path / "artifact" / filename, map_location="cpu", weights_only=True
+        )
         model.load_state_dict(state, strict=True)
         model.cpu().eval()
         if name == "pytorch_polynomial":
             example = np.array([-0.5, 0.0, 0.5], dtype=np.float32)
         elif name == "pytorch_custom_network":
-            example = np.linspace(-0.5, 0.5, 2 * model.linear1.in_features, dtype=np.float32)
+            example = np.linspace(
+                -0.5, 0.5, 2 * model.linear1.in_features, dtype=np.float32
+            )
             example = example.reshape(2, model.linear1.in_features)
         elif name == "pytorch_mnist_lstm":
             example = np.zeros((2, 1, 28, 28), dtype=np.float32)
             example[:, :, 5:23, 13:15] = 1.0
         else:
-            example = np.random.default_rng(42).normal(size=(2, 100, 1, 1)).astype(np.float32)
+            example = (
+                np.random.default_rng(42).normal(size=(2, 100, 1, 1)).astype(np.float32)
+            )
         # MLflow defaults to its torch-compatible CloudPickle adapter, which
         # supplies both Pickler and Unpickler. Raw cloudpickle does not.
     else:
@@ -117,6 +132,10 @@ def load_example(name, data_root):
         )
 
         task, model_class = {
+            "huggingface_custom": (
+                "text-classification",
+                AutoModelForSequenceClassification,
+            ),
             "huggingface_classification": (
                 "text-classification",
                 AutoModelForSequenceClassification,
@@ -132,7 +151,15 @@ def load_example(name, data_root):
             "huggingface_generation": ("text-generation", AutoModelForCausalLM),
         }[name]
         tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
-        network = model_class.from_pretrained(path, local_files_only=True).cpu().eval()
+        network = (
+            model_class.from_pretrained(
+                path,
+                local_files_only=True,
+                trust_remote_code=(name == "huggingface_custom"),
+            )
+            .cpu()
+            .eval()
+        )
         model = pipeline(task, model=network, tokenizer=tokenizer, device=-1)
         kwargs["task"] = task
         if task == "question-answering":
@@ -174,7 +201,9 @@ def main():
     if args.output is None:
         parser.error("--output is required unless --list is used")
     selected = args.case or [
-        name for name, (family, _) in CASES.items() if args.device == "cpu" or family != "sklearn"
+        name
+        for name, (family, _) in CASES.items()
+        if args.device == "cpu" or family != "sklearn"
     ]
     if args.device == "gpu" and any(CASES[name][0] == "sklearn" for name in selected):
         parser.error("sklearn supports CPU only")
@@ -202,7 +231,11 @@ def main():
             wrapper = importlib.import_module("mlflow_triton_control." + flavor)
             with mlflow.start_run(experiment_id=experiment, run_name=name):
                 info = wrapper.log_model(
-                    model, name=name, input_example=example, device=args.device, **kwargs
+                    model,
+                    name=name,
+                    input_example=example,
+                    device=args.device,
+                    **kwargs,
                 )
             import shutil
 
@@ -226,7 +259,9 @@ def main():
                     if array.dtype == object:
                         array = np.asarray(
                             [
-                                item.decode("utf-8") if isinstance(item, bytes) else item
+                                item.decode("utf-8")
+                                if isinstance(item, bytes)
+                                else item
                                 for item in array.ravel()
                             ],
                             dtype=str,

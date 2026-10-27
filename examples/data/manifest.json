@@ -61,6 +61,11 @@
       "family": "transformers",
       "artifact_path": "trained21/llm_sft/bundle",
       "source_directory": "trained21/llm_sft"
+    },
+    "huggingface_custom": {
+      "family": "transformers",
+      "artifact_path": "custom/huggingface_custom/bundle",
+      "source_directory": "custom/huggingface_custom"
     }
   },
   "files": {
@@ -519,6 +524,46 @@
     "trained21/llm_sft/result.json": {
       "size": 4264,
       "sha256": "fc05c88bcc4bf01a653b9ada1c1d319d5a034b3a571397d1c70eb450fd8adf68"
+    },
+    "custom/huggingface_custom/provenance.json": {
+      "size": 280,
+      "sha256": "2dbe6b069fe6e68deabf49ed6887936d422762090cd32841477fc2cb497a589a"
+    },
+    "custom/huggingface_custom/bundle/model.safetensors": {
+      "size": 17549312,
+      "sha256": "b97ec2c541d9c7e6d17c4f10d54d903eb588cf7f7f7609e575d4decdfe0bf652"
+    },
+    "custom/huggingface_custom/bundle/special_tokens_map.json": {
+      "size": 125,
+      "sha256": "b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3"
+    },
+    "custom/huggingface_custom/bundle/modeling_custom.py": {
+      "size": 1593,
+      "sha256": "9cc23cb14a48759acf6c3ee9786623a0c6055c7faac4b9fe3261fe42202402e6"
+    },
+    "custom/huggingface_custom/bundle/configuration_custom.py": {
+      "size": 446,
+      "sha256": "a3ab48d791f4f7132a2efd2faaa73033a18de1033f4ec78094718918c8b2431d"
+    },
+    "custom/huggingface_custom/bundle/tokenizer_config.json": {
+      "size": 1300,
+      "sha256": "e711904cac23112776b678356ccf702cf934babaa01125f698ac43bf9ad38e73"
+    },
+    "custom/huggingface_custom/bundle/requirements.txt": {
+      "size": 938,
+      "sha256": "bc4ac5afbe18de2024bdc42df919cf6dfd2337a8df69b0e8f092276769267c8d"
+    },
+    "custom/huggingface_custom/bundle/vocab.txt": {
+      "size": 231508,
+      "sha256": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"
+    },
+    "custom/huggingface_custom/bundle/config.json": {
+      "size": 959,
+      "sha256": "3714d1e2cf90c0b71e4f28347a8759333e46e45d2a3ea4f6b7c3ba384e8476ce"
+    },
+    "custom/huggingface_custom/bundle/tokenizer.json": {
+      "size": 711661,
+      "sha256": "da0e79933b9ed51798a3ae27893d3c5fa4a201126cef75586296df9b4d2c62a0"
     }
   }
 }

@@ -1,8 +1,10 @@
 # Saved test artifacts
 
-This directory contains the data for all 12 cases in `../real_models.py`:
-four sklearn, four PyTorch and four Hugging Face examples. It is a byte-for-byte
-copy of the selected case directories from triton-model-generator/benchmarks/data.
+This directory contains the data for all 13 cases in `../real_models.py`:
+four sklearn, four PyTorch and five Hugging Face examples. The original twelve
+are byte-for-byte copies of selected case directories from
+triton-model-generator/benchmarks/data. The additional custom HF case reuses the
+unchanged hf_glue weights/tokenizer with local custom configuration/model code.
 No generator checkout, training run or model download is needed to load them.
 
 Binary weights, serialized architectures and NumPy fixtures are tracked by Git LFS.

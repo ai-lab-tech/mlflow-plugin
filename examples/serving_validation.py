@@ -24,7 +24,10 @@ def compare_outputs(actual, expected, specs):
             raise AssertionError(f"Output shape mismatch: {name}")
         if spec["datatype"] == "BYTES":
             observed = np.asarray(
-                [item.decode("utf-8") if isinstance(item, bytes) else item for item in observed.ravel()]
+                [
+                    item.decode("utf-8") if isinstance(item, bytes) else item
+                    for item in observed.ravel()
+                ]
             ).reshape(observed.shape)
             np.testing.assert_array_equal(observed, reference, err_msg=name)
         else:
@@ -43,20 +46,113 @@ def compare_outputs(actual, expected, specs):
                 np.testing.assert_array_equal(observed, reference, err_msg=name)
 
 
+def comparison_result(actual, expected, specs):
+    """Keep the existing tolerances and record differences without hiding them."""
+    import numpy as np
+
+    report = {
+        "status": "passed",
+        "rtol": 1e-5,
+        "atol": 1e-6,
+        "equal_nan": True,
+        "outputs": {},
+    }
+    try:
+        compare_outputs(actual, expected, specs)
+    except AssertionError as error:
+        report.update(status="failed", error=str(error))
+    for spec in specs:
+        name = spec["name"]
+        a, b = actual.get(name), expected.get(name)
+        if a is None or b is None or a.shape != b.shape:
+            continue
+        if np.issubdtype(a.dtype, np.floating) and np.issubdtype(b.dtype, np.floating):
+            finite = np.isfinite(a) & np.isfinite(b)
+            difference = np.abs(
+                a[finite].astype(np.float64) - b[finite].astype(np.float64)
+            )
+            report["outputs"][name] = {
+                "elements": int(a.size),
+                "mismatched_elements": int(
+                    np.count_nonzero(
+                        ~np.isclose(a, b, rtol=1e-5, atol=1e-6, equal_nan=True)
+                    )
+                ),
+                "max_absolute_finite_difference": float(difference.max())
+                if difference.size
+                else None,
+            }
+    return report
+
+
+def native_gpu_reference():
+    """Independent native MLflow prediction in its own process, before Triton starts."""
+    import importlib.util
+    import os
+
+    import mlflow.pyfunc
+    import numpy as np
+
+    contract = json.loads(Path("/model/1/contract.json").read_text())
+    # Reuse schema conversion only. Do not instantiate TritonPythonModel or execute().
+    spec = importlib.util.spec_from_file_location("tensor_mapping", "/model/1/model.py")
+    mapping = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mapping)
+    with np.load("/fixture.npz", allow_pickle=False) as fixture:
+        inputs = {k[6:]: fixture[k] for k in fixture.files if k.startswith("input:")}
+        cpu = {k[7:]: fixture[k] for k in fixture.files if k.startswith("output:")}
+    for entry in contract["inputs"]:
+        if entry["datatype"] == "BYTES":
+            inputs[entry["name"]] = inputs[entry["name"]].astype(object)
+    os.environ["MLFLOW_DEFAULT_PREDICTION_DEVICE"] = (
+        "0" if contract["flavor"] == "transformers" else "cuda:0"
+    )
+    os.environ["MLFLOW_HUGGINGFACE_USE_DEVICE_MAP"] = "false"
+    model = mlflow.pyfunc.load_model("/model/1/artifact")
+    predicted = mapping.encode_outputs(
+        model.predict(mapping.decode_inputs(inputs, contract)), contract
+    )
+    saved = {}
+    for name, value in predicted.items():
+        if value.dtype == object:
+            value = np.asarray(
+                [
+                    item.decode("utf-8") if isinstance(item, bytes) else item
+                    for item in value.ravel()
+                ],
+                dtype=str,
+            ).reshape(value.shape)
+        saved[name] = value
+    np.savez("/tmp/native-gpu.npz", **saved)
+    report = {"native_gpu_vs_cpu": comparison_result(saved, cpu, contract["outputs"])}
+    Path("/tmp/comparison-details.json").write_text(json.dumps(report, indent=2) + "\n")
+    print(json.dumps(report), flush=True)
+
+
 def client_main():
     import numpy as np
     import tritonclient.http as http
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
-    parser.add_argument("--startup-timeout", type=int, required=True)
-    parser.add_argument("--inference-timeout", type=int, required=True)
+    parser.add_argument("--startup-timeout", type=int, default=180)
+    parser.add_argument("--inference-timeout", type=int, default=180)
     parser.add_argument("--device", choices=["cpu", "gpu"], default="cpu")
+    parser.add_argument("--native-gpu-reference", action="store_true")
     args = parser.parse_args()
+    if args.native_gpu_reference:
+        native_gpu_reference()
+        return
     contract = json.loads(Path("/model/1/contract.json").read_text())
     with np.load("/fixture.npz", allow_pickle=False) as fixture:
         inputs = {k[6:]: fixture[k] for k in fixture.files if k.startswith("input:")}
         expected = {k[7:]: fixture[k] for k in fixture.files if k.startswith("output:")}
+    cpu_expected = expected
+    details = {}
+    if args.device == "gpu":
+        with np.load("/tmp/native-gpu.npz", allow_pickle=False) as reference:
+            expected = {key: reference[key] for key in reference.files}
+        details = json.loads(Path("/tmp/comparison-details.json").read_text())
     with http.InferenceServerClient(
         "localhost:8000",
         connection_timeout=5,
@@ -76,7 +172,9 @@ def client_main():
         groups = config.get("instance_group", [])
         expected_kind = "KIND_GPU" if args.device == "gpu" else "KIND_CPU"
         if not groups or any(group.get("kind") != expected_kind for group in groups):
-            raise AssertionError(f"Triton instance configuration does not match {args.device}")
+            raise AssertionError(
+                f"Triton instance configuration does not match {args.device}"
+            )
         request = []
         for spec in contract["inputs"]:
             array = inputs[spec["name"]]
@@ -88,19 +186,37 @@ def client_main():
         response = client.infer(
             args.model,
             request,
-            outputs=[http.InferRequestedOutput(s["name"], binary_data=True) for s in contract["outputs"]],
+            outputs=[
+                http.InferRequestedOutput(s["name"], binary_data=True)
+                for s in contract["outputs"]
+            ],
         )
         names = [item["name"] for item in response.get_response()["outputs"]]
         if len(names) != len(set(names)):
             raise AssertionError("Duplicate Triton output names")
         actual = {name: response.as_numpy(name) for name in names}
+        comparison_key = (
+            "triton_vs_native_gpu" if args.device == "gpu" else "triton_vs_cpu"
+        )
+        details[comparison_key] = comparison_result(
+            actual, expected, contract["outputs"]
+        )
+        if args.device == "gpu":
+            details["triton_vs_cpu"] = comparison_result(
+                actual, cpu_expected, contract["outputs"]
+            )
+        Path("/tmp/comparison-details.json").write_text(
+            json.dumps(details, indent=2) + "\n"
+        )
         compare_outputs(actual, expected, contract["outputs"])
         print(
             json.dumps(
                 {
                     "triton_validation": "passed",
                     "requests": 1,
-                    "comparison": "saved_native_artifact",
+                    "comparison": "saved_native_artifact_gpu"
+                    if args.device == "gpu"
+                    else "saved_native_artifact_cpu",
                     "rtol": 1e-5,
                     "atol": 1e-6,
                     "equal_nan": True,
@@ -125,7 +241,13 @@ def validate_serving(row, image, python_version, requirements, directory, option
 
     def run(command, filename, timeout=60):
         with (directory / filename).open("a") as log:
-            subprocess.run(command, check=True, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+            subprocess.run(
+                command,
+                check=True,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                timeout=timeout,
+            )
 
     try:
         run(
@@ -232,7 +354,11 @@ def validate_serving(row, image, python_version, requirements, directory, option
                 "--target",
                 "/tmp/model-deps",
                 "--upgrade",
-                *(["--extra-index-url", "https://download.pytorch.org/whl/cpu"] if device == "cpu" else []),
+                *(
+                    ["--extra-index-url", "https://download.pytorch.org/whl/cpu"]
+                    if device == "cpu"
+                    else []
+                ),
                 "-r",
                 "/family-requirements.txt",
                 "-r",
@@ -262,6 +388,25 @@ def validate_serving(row, image, python_version, requirements, directory, option
         result["triton_stage"] = "server_start"
         # Inference needs no network access outside the container.
         run(["docker", "network", "disconnect", "bridge", name], "runtime.log")
+        if device == "gpu":
+            result["triton_stage"] = "native_gpu_reference"
+            run(
+                [
+                    "docker",
+                    "exec",
+                    name,
+                    "python3",
+                    "/validation.py",
+                    "--model",
+                    row["case"],
+                    "--device",
+                    "gpu",
+                    "--native-gpu-reference",
+                ],
+                "native-gpu.log",
+                options.inference_timeout,
+            )
+        result["triton_stage"] = "server_start"
         run(
             [
                 "docker",
@@ -301,7 +446,9 @@ def validate_serving(row, image, python_version, requirements, directory, option
             triton_validation="passed",
             triton_stage="complete",
             requests=1,
-            comparison="saved_native_artifact",
+            comparison="saved_native_artifact_gpu"
+            if device == "gpu"
+            else "saved_native_artifact_cpu",
             rtol=1e-5,
             atol=1e-6,
             equal_nan=True,
@@ -310,12 +457,49 @@ def validate_serving(row, image, python_version, requirements, directory, option
         result["triton_error"] = f"{type(error).__name__}: {error}; see {directory}"
     finally:
         try:
+            details = json.loads(
+                subprocess.check_output(
+                    ["docker", "exec", name, "cat", "/tmp/comparison-details.json"],
+                    text=True,
+                    timeout=30,
+                )
+            )
+            required_key = (
+                "triton_vs_native_gpu" if device == "gpu" else "triton_vs_cpu"
+            )
+            if (
+                result["triton_validation"] == "passed"
+                and details.get(required_key, {}).get("status") != "passed"
+            ):
+                raise ValueError("Missing or unsuccessful primary comparison report")
+            if (
+                result["triton_validation"] == "passed"
+                and device == "gpu"
+                and "native_gpu_vs_cpu" not in details
+            ):
+                raise ValueError("Missing CPU/GPU diagnostic comparison")
+            for key in ["native_gpu_vs_cpu", "triton_vs_native_gpu", "triton_vs_cpu"]:
+                if key in details:
+                    result[key] = details[key]
+            (directory / "comparison-details.json").write_text(
+                json.dumps(details, indent=2) + "\n"
+            )
+        except Exception as error:
+            result["comparison_details_error"] = str(error)
+            if result["triton_validation"] == "passed":
+                result["triton_validation"] = "failed"
+        try:
             run(["docker", "exec", name, "cat", "/tmp/triton.log"], "server.log", 30)
         except Exception:
             pass
         finally:
             try:
-                subprocess.run(["docker", "rm", "-f", name], check=False, capture_output=True, timeout=30)
+                subprocess.run(
+                    ["docker", "rm", "-f", name],
+                    check=False,
+                    capture_output=True,
+                    timeout=30,
+                )
             except Exception as error:
                 result["cleanup_error"] = str(error)
                 result["triton_validation"] = "failed"

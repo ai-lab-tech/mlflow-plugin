@@ -1,6 +1,7 @@
 """Serving comparison and orchestration tests; no Docker process is launched."""
 
 import importlib.util
+import json
 import subprocess
 import tempfile
 import unittest
@@ -44,7 +45,12 @@ class ServingValidationTests(unittest.TestCase):
             serving.compare_outputs({"score": actual["score"]}, expected, specs)
 
     def run_scenario(
-        self, fail_client=False, version="3.11", device="cpu", fail_gpu=False
+        self,
+        fail_client=False,
+        version="3.11",
+        device="cpu",
+        fail_gpu=False,
+        fail_reference=False,
     ):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -60,6 +66,8 @@ class ServingValidationTests(unittest.TestCase):
 
             def run(command, **kwargs):
                 commands.append(command)
+                if fail_reference and "--native-gpu-reference" in command:
+                    raise subprocess.CalledProcessError(1, command)
                 if fail_gpu and any(
                     "torch.cuda.is_available()" in part for part in command
                 ):
@@ -73,7 +81,17 @@ class ServingValidationTests(unittest.TestCase):
                 patch.object(
                     serving.subprocess,
                     "check_output",
-                    side_effect=[version, "libpython3.11.so"],
+                    side_effect=[
+                        version,
+                        "libpython3.11.so",
+                        json.dumps(
+                            {
+                                "native_gpu_vs_cpu": {"status": "failed"},
+                                "triton_vs_native_gpu": {"status": "passed"},
+                                "triton_vs_cpu": {"status": "passed"},
+                            }
+                        ),
+                    ],
                 ),
             ):
                 result = serving.validate_serving(
@@ -133,3 +151,42 @@ class ServingValidationTests(unittest.TestCase):
         self.assertEqual(result["device"], "cpu")
         self.assertNotIn("--gpus", command)
         self.assertIn("CUDA_VISIBLE_DEVICES=-1", command)
+
+    def test_comparison_report_keeps_cpu_gpu_difference_visible(self):
+        expected = {"x": np.array([0.0, 1.0], dtype=np.float32)}
+        actual = {"x": np.array([6e-6, 1.0], dtype=np.float32)}
+        report = serving.comparison_result(
+            actual, expected, [{"name": "x", "datatype": "FP32"}]
+        )
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["outputs"]["x"]["mismatched_elements"], 1)
+        self.assertEqual(report["atol"], 1e-6)
+        self.assertGreater(
+            report["outputs"]["x"]["max_absolute_finite_difference"], 5e-6
+        )
+
+    def test_gpu_reference_runs_before_triton_start_and_cpu_drift_stays_separate(self):
+        result, commands = self.run_scenario(device="gpu")
+        reference = next(
+            i for i, c in enumerate(commands) if "--native-gpu-reference" in c
+        )
+        server = next(
+            i
+            for i, c in enumerate(commands)
+            if any("exec /opt/tritonserver/bin/tritonserver" in part for part in c)
+        )
+        self.assertLess(reference, server)
+        self.assertEqual(result["triton_validation"], "passed")
+        self.assertEqual(result["native_gpu_vs_cpu"]["status"], "failed")
+        self.assertEqual(result["comparison"], "saved_native_artifact_gpu")
+
+    def test_failed_native_gpu_reference_blocks_server_start(self):
+        result, commands = self.run_scenario(device="gpu", fail_reference=True)
+        self.assertEqual(result["triton_validation"], "failed")
+        self.assertEqual(result["triton_stage"], "native_gpu_reference")
+        self.assertFalse(
+            any(
+                "exec /opt/tritonserver/bin/tritonserver" in " ".join(c)
+                for c in commands
+            )
+        )

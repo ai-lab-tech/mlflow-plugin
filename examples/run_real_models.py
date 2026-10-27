@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run all twelve examples in isolated Docker environments."""
+"""Run saved-model examples in isolated Docker environments."""
 
 from __future__ import annotations
 
