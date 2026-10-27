@@ -108,9 +108,6 @@ def _assemble_repository(
     artifact.rename(version / "artifact")
     config = config_text(triton_model_name, contract, device)
     shutil.copyfile(Path(_runtime.__file__), version / "model.py")
-    (version / "contract.json").write_text(
-        json.dumps(contract, indent=2, allow_nan=False) + "\n"
-    )
     (repository / "config.pbtxt").write_text(config)
     requirements = (
         (package / "requirements.txt").read_text()

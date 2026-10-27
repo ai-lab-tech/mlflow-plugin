@@ -24,7 +24,7 @@ from mlflow_triton import (
     transformers,
     triton,
 )
-from mlflow_triton._signature import config_text, contract_from_signature
+from mlflow_triton._signature import config_text, contract_from_signature, model_config
 from sklearn.linear_model import LinearRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -69,7 +69,7 @@ class LoggingWrapperTests(unittest.TestCase):
         importlib.util.find_spec("tritonclient"), "tritonclient is optional"
     )
     def test_config_parses_multiple_inputs_and_outputs_with_triton_schema(self):
-        from google.protobuf import text_format
+        from google.protobuf import json_format, text_format
         from tritonclient.grpc import model_config_pb2
 
         signatures = [
@@ -119,6 +119,46 @@ class LoggingWrapperTests(unittest.TestCase):
                             )
                     self.assertEqual(config.backend, "python")
                     self.assertEqual(config.max_batch_size, 0)
+                    restored = _runtime.contract_from_config(
+                        json_format.MessageToDict(
+                            config, preserving_proto_field_name=True
+                        )
+                    )
+                    for direction in ("inputs", "outputs"):
+                        for actual, expected in zip(
+                            restored[direction], contract[direction]
+                        ):
+                            for key in (
+                                "name",
+                                "source_name",
+                                "dims",
+                                "datatype",
+                                "logical_type",
+                                "named",
+                            ):
+                                self.assertEqual(actual[key], expected[key])
+
+    @unittest.skipUnless(
+        importlib.util.find_spec("tritonclient"), "tritonclient is optional"
+    )
+    def test_example_reader_uses_generated_config_without_contract_file(self):
+        # Arrange
+        path = self.prepare()
+        repository = path / "model_repository/model"
+        source = Path(__file__).resolve().parents[1] / "examples/serving_validation.py"
+        spec = importlib.util.spec_from_file_location("validation_reader_test", source)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        # Act
+        contract = module.read_model_contract(repository)
+        restored = _runtime.decode_inputs(
+            _runtime.example_tensors(self.example, contract), contract
+        )
+
+        # Assert
+        self.assertFalse((repository / "1/contract.json").exists())
+        pd.testing.assert_frame_equal(restored, self.example)
 
     def test_every_public_wrapper_requires_example_before_logging(self):
         for wrapper in (sklearn, pytorch, transformers):
@@ -149,6 +189,8 @@ class LoggingWrapperTests(unittest.TestCase):
         self.assertIn('backend: "python"', text)
         self.assertIn("max_batch_size: 0", text)
         self.assertIn("KIND_CPU", text)
+        self.assertIn('key: "mlflow_contract"', text)
+        self.assertFalse((repository / "1/contract.json").exists())
         report = json.loads((repository / "validation.json").read_text())
         self.assertEqual(report["triton_validation"], "not_run")
         self.assertEqual(report["signature_origin"], "mlflow_inferred")
@@ -305,7 +347,19 @@ class LoggingWrapperTests(unittest.TestCase):
         with patch.dict(sys.modules, {"triton_python_backend_utils": utils}):
             backend = module.TritonPythonModel()
             backend.initialize(
-                {"model_instance_kind": "CPU", "model_instance_device_id": "0"}
+                {
+                    "model_instance_kind": "CPU",
+                    "model_instance_device_id": "0",
+                    "model_config": json.dumps(
+                        model_config(
+                            "model",
+                            contract_from_signature(
+                                Model.load(path / "MLmodel").signature, "sklearn"
+                            ),
+                            "cpu",
+                        )
+                    ),
+                }
             )
             inputs = {
                 "left": Tensor("left", self.example.left.to_numpy()),

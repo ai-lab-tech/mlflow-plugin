@@ -93,7 +93,6 @@ MLflow model artifact/
     ├── validation.json
     └── 1/
         ├── model.py
-        ├── contract.json
         └── artifact/            # Self-contained native MLflow model
 ```
 

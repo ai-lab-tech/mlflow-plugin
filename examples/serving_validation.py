@@ -85,6 +85,24 @@ def comparison_result(actual, expected, specs):
     return report
 
 
+def read_model_contract(model_directory):
+    """Read the generated config using Triton's protobuf schema (test tooling only)."""
+    import importlib.util
+
+    from google.protobuf import json_format, text_format
+    from tritonclient.grpc import model_config_pb2
+
+    root = Path(model_directory)
+    config = model_config_pb2.ModelConfig()
+    text_format.Parse((root / "config.pbtxt").read_text(), config)
+    spec = importlib.util.spec_from_file_location("tensor_mapping", root / "1/model.py")
+    mapping = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mapping)
+    return mapping.contract_from_config(
+        json_format.MessageToDict(config, preserving_proto_field_name=True)
+    )
+
+
 def native_gpu_reference():
     """Independent native MLflow prediction in its own process, before Triton starts."""
     import importlib.util
@@ -93,7 +111,7 @@ def native_gpu_reference():
     import mlflow.pyfunc
     import numpy as np
 
-    contract = json.loads(Path("/model/1/contract.json").read_text())
+    contract = read_model_contract("/model")
     # Reuse schema conversion only. Do not instantiate TritonPythonModel or execute().
     spec = importlib.util.spec_from_file_location("tensor_mapping", "/model/1/model.py")
     mapping = importlib.util.module_from_spec(spec)
@@ -143,7 +161,7 @@ def client_main():
     if args.native_gpu_reference:
         native_gpu_reference()
         return
-    contract = json.loads(Path("/model/1/contract.json").read_text())
+    contract = read_model_contract("/model")
     with np.load("/fixture.npz", allow_pickle=False) as fixture:
         inputs = {k[6:]: fixture[k] for k in fixture.files if k.startswith("input:")}
         expected = {k[7:]: fixture[k] for k in fixture.files if k.startswith("output:")}
@@ -363,7 +381,7 @@ def validate_serving(row, image, python_version, requirements, directory, option
                 "/family-requirements.txt",
                 "-r",
                 "/model/requirements.txt",
-                "tritonclient[http]",
+                "tritonclient[http,grpc]",
             ],
             "install.log",
             options.timeout,

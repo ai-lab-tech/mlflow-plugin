@@ -148,7 +148,8 @@ makes the command exit nonzero. The source artifacts are never modified.
 
 Each successful log contains the native MLflow package plus
 `model_repository/<name>/config.pbtxt`, `requirements.txt`, `validation.json`,
-`1/model.py`, `1/contract.json` and `1/artifact/`.
+`1/model.py` and `1/artifact/`. The MLflow mapping is stored in the
+`mlflow_contract` parameter of `config.pbtxt`.
 Native and Triton packages both contain the weights, so allow for duplicate storage.
 
 ## What this validates

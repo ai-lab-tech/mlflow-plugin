@@ -26,7 +26,10 @@ CASES = {
     "huggingface_custom": ("transformers", "huggingface_custom/bundle"),
     "huggingface_classification": ("transformers", "huggingface_classification/bundle"),
     "huggingface_ner": ("transformers", "huggingface_ner/bundle"),
-    "huggingface_question_answering": ("transformers", "huggingface_question_answering/bundle"),
+    "huggingface_question_answering": (
+        "transformers",
+        "huggingface_question_answering/bundle",
+    ),
     "huggingface_generation": ("transformers", "huggingface_generation/bundle"),
 }
 
@@ -240,14 +243,15 @@ def main():
             import shutil
 
             import numpy as np
-
             from mlflow_triton import _runtime, triton
 
             repository = triton.load_model(info.model_uri)
             serving = output / "serving" / name
             serving.parent.mkdir(exist_ok=True)
             shutil.copytree(repository, serving)
-            contract = json.loads((serving / "1/contract.json").read_text())
+            from serving_validation import read_model_contract
+
+            contract = read_model_contract(serving)
             # Independent prediction through the saved native MLflow artifact.
             native = _runtime.load_predictor(serving / "1/artifact", flavor)
             expected = _runtime.encode_outputs(native.predict(example), contract)

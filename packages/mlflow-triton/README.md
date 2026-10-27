@@ -79,7 +79,6 @@ model_repository/<name>/
   validation.json
   1/
     model.py
-    contract.json
     artifact/          # Complete local MLflow package, including code and assets
 ```
 
@@ -92,7 +91,7 @@ Python backend stub; custom code dependencies must be included or installed.
 
 The generated configuration uses `backend: "python"` and `max_batch_size: 0`.
 Tensor shapes include their full batch dimension. Column schemas map to separate
-rank-one tensors; tensor schemas retain their declared shapes. `contract.json`
+rank-one tensors; tensor schemas retain their declared shapes. The `mlflow_contract` parameter in `config.pbtxt`
 records mappings between original field names and Triton-safe tensor names.
 Only dynamic axes already declared by the signature are retained; a single
 example does not prove that other sequence/image dimensions are variable.
@@ -338,3 +337,23 @@ offline environment settings are temporarily applied, including restoration afte
 failure. This lock does not protect unrelated code that modifies `os.environ`,
 direct MLflow loads, or separately imported runtime copies. Coordinate those callers
 or use separate processes. Prediction requests are not serialized by this lock.
+
+## MLflow mapping in Triton configuration
+
+Generated repositories store the MLflow-specific mapping as JSON in the
+`parameters.mlflow_contract.string_value` field of `config.pbtxt`. It contains a
+mapping version, framework flavor, input/output structure (columns, single tensor
+or named tensors), original field names and text/binary semantics. Tensor names
+link mapping entries to the standard `input` and `output` configuration fields;
+datatypes and shapes are read exclusively from those fields.
+
+Triton passes the configuration to `model.py.initialize()` as `args["model_config"]`.
+The runtime validates and reconstructs its tensor mapping from it. Device placement
+still comes from Triton's assigned instance kind/device ID. No separate
+`contract.json` is generated or read by the new runtime. Unsupported mapping
+versions, missing tensor mappings and nonzero `max_batch_size` fail initialization.
+
+Existing logged artifacts retain their original `model.py` and `contract.json`.
+Re-log a model to produce the new layout; do not mix old generated runtime files
+with new configuration. Editing a mapping or tensor schema must remain compatible
+with the saved model's prediction interface and requires renewed validation.

@@ -118,22 +118,60 @@ def validate_serving_options(name, flavor, device):
         raise ValueError("The sklearn wrapper requires device=cpu")
 
 
-def config_text(name, contract, device):
+def model_config(name, contract, device):
+    """Build Triton's configuration, retaining only MLflow-specific mapping data."""
     validate_serving_options(name, contract["flavor"], device)
+    mapping = {
+        "version": 1,
+        "flavor": contract["flavor"],
+        "input_mode": contract["input_mode"],
+        "output_mode": contract["output_mode"],
+    }
+    config = {"name": name, "backend": "python", "max_batch_size": 0}
+    for direction in ("input", "output"):
+        specs = contract[direction + "s"]
+        config[direction] = [
+            {
+                "name": spec["name"],
+                "data_type": "TYPE_"
+                + ("STRING" if spec["datatype"] == "BYTES" else spec["datatype"]),
+                "dims": spec["dims"],
+            }
+            for spec in specs
+        ]
+        mapping[direction + "s"] = [
+            {key: spec[key] for key in ("name", "source_name", "named", "logical_type")}
+            for spec in specs
+        ]
+    config["parameters"] = {
+        "mlflow_contract": {"string_value": json.dumps(mapping, separators=(",", ":"))}
+    }
+    config["instance_group"] = [{"count": 1, "kind": "KIND_" + device.upper()}]
+    return config
+
+
+def config_text(name, contract, device):
+    config = model_config(name, contract, device)
     lines = [f"name: {json.dumps(name)}", 'backend: "python"', "max_batch_size: 0"]
     for direction in ("input", "output"):
         lines.append(direction + " [")
-        items = contract[direction + "s"]
-        for index, item in enumerate(items):
-            dtype = "STRING" if item["datatype"] == "BYTES" else item["datatype"]
+        for index, item in enumerate(config[direction]):
             lines.append(
                 "  { name: "
                 + json.dumps(item["name"])
-                + f" data_type: TYPE_{dtype} dims: "
+                + " data_type: "
+                + item["data_type"]
+                + " dims: "
                 + json.dumps(item["dims"])
                 + " }"
-                + ("," if index < len(items) - 1 else "")
+                + ("," if index < len(config[direction]) - 1 else "")
             )
         lines.append("]")
     lines.append("instance_group [{ count: 1 kind: KIND_" + device.upper() + " }]")
+    value = config["parameters"]["mlflow_contract"]["string_value"]
+    lines.append(
+        'parameters { key: "mlflow_contract" value { string_value: '
+        + json.dumps(value)
+        + " } }"
+    )
     return "\n".join(lines) + "\n"

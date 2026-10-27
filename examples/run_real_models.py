@@ -29,7 +29,10 @@ GROUPS = {
         "python:3.14-slim",
         "pytorch_mnist_lstm/artifact/requirements.txt",
     ),
-    "transformers": ("python:3.11-slim", "huggingface_classification/bundle/requirements.txt"),
+    "transformers": (
+        "python:3.11-slim",
+        "huggingface_classification/bundle/requirements.txt",
+    ),
 }
 DEPENDENCIES = {
     "sklearn": {"numpy", "pandas", "scipy", "scikit-learn", "joblib"},
@@ -73,6 +76,7 @@ def runtime_requirements(data, family, device="cpu"):
                     else []
                 ),
                 "mlflow==3.17.2",
+                "tritonclient[grpc]",
                 "httpx>=0.27,<1",
                 "cloudpickle==3.1.2",
                 *(
