@@ -13,6 +13,7 @@ import mlflow
 from mlflow.models import Model, infer_signature
 
 from . import _runtime
+from ._request import write_request_example
 from ._signature import config_text, contract_from_signature, validate_serving_options
 
 
@@ -94,7 +95,14 @@ def _validate_saved_model(native, flavor, input_example, signature):
 
 
 def _assemble_repository(
-    native, staging, metadata, contract, triton_model_name, device, signature
+    native,
+    staging,
+    metadata,
+    contract,
+    triton_model_name,
+    device,
+    signature,
+    input_example,
 ):
     # Make only the independent serving copy. Move directories on the same disk
     # instead of recopying the complete package into its final location.
@@ -109,6 +117,7 @@ def _assemble_repository(
     config = config_text(triton_model_name, contract, device)
     shutil.copyfile(Path(_runtime.__file__), version / "model.py")
     (repository / "config.pbtxt").write_text(config)
+    write_request_example(repository, input_example, contract)
     requirements = (
         (package / "requirements.txt").read_text()
         if (package / "requirements.txt").exists()
@@ -179,7 +188,14 @@ def prepare_model(
             native, flavor, input_example, signature
         )
         package = _assemble_repository(
-            native, staging, metadata, contract, triton_model_name, device, signature
+            native,
+            staging,
+            metadata,
+            contract,
+            triton_model_name,
+            device,
+            signature,
+            input_example,
         )
         if destination.exists() or destination.is_symlink():
             raise FileExistsError("Destination already exists: " + str(destination))

@@ -76,6 +76,7 @@ flavor pointing to:
 model_repository/<name>/
   config.pbtxt
   requirements.txt
+  request.json
   validation.json
   1/
     model.py
@@ -357,3 +358,21 @@ Existing logged artifacts retain their original `model.py` and `contract.json`.
 Re-log a model to produce the new layout; do not mix old generated runtime files
 with new configuration. Editing a mapping or tensor schema must remain compatible
 with the saved model's prediction interface and requires renewed validation.
+
+## Ready-to-send inference example
+
+Each framework wrapper generates one `request.json` beside `config.pbtxt`, using
+values from `input_example`, concrete tensor shapes and all configured output names.
+See the [central request instructions](https://github.com/ai-lab-tech/mlflow-plugin#send-an-example-request)
+for curl commands. No per-model shell script or instruction file is generated.
+Logging does not send a request.
+
+For NaN/infinity or binary byte inputs, the example instead consists of
+`request.bin` (complete HTTP body, including its JSON prefix) and `request.headers`
+(the HTTP content type and JSON-prefix byte length). This uses
+[Triton's binary tensor extension](https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/protocol/extension_binary_data.html)
+without changing input values. Outputs are requested as binary in that case.
+
+Example files contain the supplied input values, just like MLflow's stored input
+example; use non-sensitive examples. The direct `triton.log_model()` API for
+pre-existing repositories does not generate requests because it takes no input example.

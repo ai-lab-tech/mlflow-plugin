@@ -90,6 +90,7 @@ MLflow model artifact/
 └── model_repository/classifier/
     ├── config.pbtxt
     ├── requirements.txt
+    ├── request.json
     ├── validation.json
     └── 1/
         ├── model.py
@@ -100,6 +101,32 @@ The generated runtime loads the packaged artifact locally. Logging validates
 saved-model prediction and tensor mappings; it does **not** launch Triton.
 Triton execution is a separate validation step. Dependencies must be installed
 in a compatible serving environment.
+
+## Send an example request
+
+From the generated model directory, with the model loaded in Triton, send the
+single generated `request.json`. Replace `classifier` with your Triton model name:
+
+```bash
+curl --fail-with-body --show-error -X POST \
+  http://localhost:8000/v2/models/classifier/infer \
+  -H 'Content-Type: application/json' \
+  --data-binary @request.json
+```
+
+For non-finite numbers or binary byte inputs, logging generates `request.bin` and
+`request.headers` instead. Send these without editing the body or header length:
+
+```bash
+curl --fail-with-body --show-error -X POST \
+  http://localhost:8000/v2/models/classifier/infer \
+  -H @request.headers --data-binary @request.bin \
+  --dump-header response.headers --output response.bin
+```
+
+The binary response is saved with its HTTP headers. Regenerate the example if the
+model schema or example inputs change. Neither logging nor generating these files
+sends requests automatically.
 
 ## Framework support
 

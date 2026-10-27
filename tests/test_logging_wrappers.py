@@ -190,6 +190,12 @@ class LoggingWrapperTests(unittest.TestCase):
         self.assertIn("max_batch_size: 0", text)
         self.assertIn("KIND_CPU", text)
         self.assertIn('key: "mlflow_contract"', text)
+        request = json.loads((repository / "request.json").read_text())
+        self.assertEqual(request["outputs"], [{"name": "output_0"}])
+        self.assertEqual(request["inputs"][0]["data"], self.example.left.tolist())
+        self.assertFalse((repository / "request.sh").exists())
+        self.assertFalse((repository / "REQUEST.md").exists())
+
         self.assertFalse((repository / "1/contract.json").exists())
         report = json.loads((repository / "validation.json").read_text())
         self.assertEqual(report["triton_validation"], "not_run")
