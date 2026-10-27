@@ -1,0 +1,33 @@
+{
+  "argv": [
+    "/tmp/upstream-10o9r0gu/examples/svm/plot_rbf_parameters.py"
+  ],
+  "cwd": "/tmp/upstream-10o9r0gu/examples/svm",
+  "repository": "scikit-learn/scikit-learn",
+  "revision": "25dee604bae18205b01548348388baf7a1cdfe0e",
+  "profile": {
+    "requirements": [
+      "numpy==1.26.4",
+      "scipy==1.15.3",
+      "scikit-learn==1.7.2",
+      "pandas==2.3.3",
+      "joblib==1.5.2",
+      "matplotlib==3.10.7",
+      "seaborn==0.13.2"
+    ],
+    "export": "clf",
+    "arguments": [],
+    "capture": [
+      "StandardScaler"
+    ],
+    "preprocessors": [
+      "StandardScaler"
+    ],
+    "notes": "Final two-feature SVC and the final two-feature fitted scaler from the original program."
+  },
+  "source_hashes": {
+    "examples/svm/plot_rbf_parameters.py": "e6306ab99714f681cf93b5978459ed682ec116d594ddb64a68bf7a1ad8ec2eb9",
+    "pyproject.toml": "9035b0add4bed5730748437b18713f35a392974bfa0d72cc4c9c2f59fc9cf7d4"
+  },
+  "python": "3.11.17 (main, Oct  6 2026, 02:02:21) [GCC 14.2.0]"
+}

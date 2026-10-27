@@ -8,7 +8,9 @@ import json
 import os
 from pathlib import Path
 
-# Paths are relative to triton-model-generator/benchmarks/data.
+DEFAULT_DATA_ROOT = Path(__file__).resolve().parent / "data"
+
+# Paths are relative to the repository-local examples/data directory.
 CASES = {
     "sklearn_mixed_columns": ("sklearn", "trained21/sk_mixed_columns/bundle"),
     "sklearn_gradient_boosting": (
@@ -45,7 +47,11 @@ def load_example(name, data_root):
 
         requirements = (path / "requirements.txt").read_text().splitlines()
         saved_version = next(
-            (line.split("==", 1)[1] for line in requirements if line.startswith("scikit-learn==")),
+            (
+                line.split("==", 1)[1]
+                for line in requirements
+                if line.startswith("scikit-learn==")
+            ),
             None,
         )
         if saved_version and sklearn.__version__ != saved_version:
@@ -70,7 +76,11 @@ def load_example(name, data_root):
         elif name == "sklearn_gradient_boosting":
             example = np.linspace(-1.0, 1.0, 20).reshape(2, 10)
         else:
-            scaler_file = "StandardScaler.joblib" if name == "sklearn_scaled_svm" else "MinMaxScaler.joblib"
+            scaler_file = (
+                "StandardScaler.joblib"
+                if name == "sklearn_scaled_svm"
+                else "MinMaxScaler.joblib"
+            )
             # Compose already fitted components; never call fit().
             model = Pipeline(
                 [
@@ -88,19 +98,25 @@ def load_example(name, data_root):
         with (path / "reference-model.pkl").open("rb") as stream:
             model = cloudpickle.load(stream)
         filename = "netG_epoch_0.pth" if name == "pytorch_dcgan" else "weights.pt"
-        state = torch.load(path / "artifact" / filename, map_location="cpu", weights_only=True)
+        state = torch.load(
+            path / "artifact" / filename, map_location="cpu", weights_only=True
+        )
         model.load_state_dict(state, strict=True)
         model.cpu().eval()
         if name == "pytorch_polynomial":
             example = np.array([-0.5, 0.0, 0.5], dtype=np.float32)
         elif name == "pytorch_custom_network":
-            example = np.linspace(-0.5, 0.5, 2 * model.linear1.in_features, dtype=np.float32)
+            example = np.linspace(
+                -0.5, 0.5, 2 * model.linear1.in_features, dtype=np.float32
+            )
             example = example.reshape(2, model.linear1.in_features)
         elif name == "pytorch_mnist_lstm":
             example = np.zeros((2, 1, 28, 28), dtype=np.float32)
             example[:, :, 5:23, 13:15] = 1.0
         else:
-            example = np.random.default_rng(42).normal(size=(2, 100, 1, 1)).astype(np.float32)
+            example = (
+                np.random.default_rng(42).normal(size=(2, 100, 1, 1)).astype(np.float32)
+            )
         # MLflow defaults to its torch-compatible CloudPickle adapter, which
         # supplies both Pickler and Unpickler. Raw cloudpickle does not.
     else:
@@ -150,7 +166,12 @@ def load_example(name, data_root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true")
-    parser.add_argument("--data-root", type=Path)
+    parser.add_argument(
+        "--data-root",
+        type=Path,
+        default=DEFAULT_DATA_ROOT,
+        help="Saved artifacts; default: examples/data in this checkout",
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--case", action="append", choices=CASES)
     args = parser.parse_args()
@@ -158,8 +179,8 @@ def main():
         for name, (flavor, relative) in CASES.items():
             print(f"{name}: {flavor} — {relative}")
         return 0
-    if args.data_root is None or args.output is None:
-        parser.error("--data-root and --output are required unless --list is used")
+    if args.output is None:
+        parser.error("--output is required unless --list is used")
     # Make running examples explicit and independent of configured remote tracking.
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -182,7 +203,9 @@ def main():
             flavor, model, example, kwargs = load_example(name, args.data_root)
             wrapper = importlib.import_module("mlflow_triton_control." + flavor)
             with mlflow.start_run(experiment_id=experiment, run_name=name):
-                info = wrapper.log_model(model, name=name, input_example=example, **kwargs)
+                info = wrapper.log_model(
+                    model, name=name, input_example=example, **kwargs
+                )
             import shutil
 
             import numpy as np
@@ -205,7 +228,9 @@ def main():
                     if array.dtype == object:
                         array = np.asarray(
                             [
-                                item.decode("utf-8") if isinstance(item, bytes) else item
+                                item.decode("utf-8")
+                                if isinstance(item, bytes)
+                                else item
                                 for item in array.ravel()
                             ],
                             dtype=str,

@@ -1,0 +1,51 @@
+{
+  "id": "sk_rbf_parameters",
+  "status": "trained_exported",
+  "stage": "complete",
+  "fingerprint": {
+    "source_hashes": {
+      "sources/sk_rbf_parameters/training_source/examples/svm/plot_rbf_parameters.py": "e6306ab99714f681cf93b5978459ed682ec116d594ddb64a68bf7a1ad8ec2eb9",
+      "sources/sk_rbf_parameters/dependency_metadata/pyproject.toml": "9035b0add4bed5730748437b18713f35a392974bfa0d72cc4c9c2f59fc9cf7d4",
+      "sources/sk_rbf_parameters/reference_only/README.rst": "1bc3cbca989cde3cb9ac815d8ae604dc7273cab737f200c6fe7aa17eb0ec69d9",
+      "sources/sk_rbf_parameters/reference_only/COPYING": "75684d16f4662ab842ed5af9482ac01939aee83c8243d89993616d959d3053f8"
+    },
+    "profile": {
+      "requirements": [
+        "numpy==1.26.4",
+        "scipy==1.15.3",
+        "scikit-learn==1.7.2",
+        "pandas==2.3.3",
+        "joblib==1.5.2",
+        "matplotlib==3.10.7",
+        "seaborn==0.13.2"
+      ],
+      "export": "clf",
+      "arguments": [],
+      "capture": [
+        "StandardScaler"
+      ],
+      "preprocessors": [
+        "StandardScaler"
+      ],
+      "notes": "Final two-feature SVC and the final two-feature fitted scaler from the original program."
+    },
+    "worker_sha256": "9f6fe18d948874be9523d294f9a648563a37bc203831e9ba0a95d4e9bbf6ec33",
+    "runner_sha256": "558b5e77dca8b18aa9be32e346e53c671cb9e59e463996e36e5012d0da49afd5",
+    "data_directory": null
+  },
+  "generator_invoked": false,
+  "triton_validated": false,
+  "runtime_image_id": "sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce",
+  "native_serving_validated": false,
+  "source_modified": false,
+  "training_completed": true,
+  "bundle_hashes": {
+    "StandardScaler.joblib": "8f90f47fe692d885a7e2483ba10d8890fcce9be3fd34adad0a2f0f85114ed2a5",
+    "model.joblib": "8057c0366effd89bbe89a07017a1dba65639c2755473df5e0ebaae58c9afc779",
+    "requirements.txt": "3fc16de8e59d89891eedce6778a79f2e49a7812e0b8e8cff99a24ec0e5439d37",
+    "training/examples/svm/plot_rbf_parameters.py": "e6306ab99714f681cf93b5978459ed682ec116d594ddb64a68bf7a1ad8ec2eb9",
+    "training/pyproject.toml": "9035b0add4bed5730748437b18713f35a392974bfa0d72cc4c9c2f59fc9cf7d4"
+  },
+  "elapsed_seconds": 2.82,
+  "container_removed": true
+}

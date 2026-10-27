@@ -1,0 +1,98 @@
+{
+  "id": "hf_qa",
+  "status": "trained_exported",
+  "stage": "complete",
+  "fingerprint": {
+    "source_hashes": {
+      "sources/hf_qa/training_source/examples/pytorch/question-answering/run_qa.py": "45fa7eb1c4f4feb850d08758d024f015f782297e5111e0857b52ed2de6f2f354",
+      "sources/hf_qa/training_source/examples/pytorch/question-answering/utils_qa.py": "e97b71070579835b53d1eed571e65d8bb43a9bb6f5021c9d4b3e0a452207bb28",
+      "sources/hf_qa/training_source/examples/pytorch/question-answering/trainer_qa.py": "73bb517b25cdd752f8cad292ca3cdf40f319e4580abb899d976dca38299483ab",
+      "sources/hf_qa/dependency_metadata/examples/pytorch/question-answering/requirements.txt": "d22f1a3e98228016b8c23b90ca9a398d9c051e8205cd5648960d636908c24bb6",
+      "sources/hf_qa/dependency_metadata/pyproject.toml": "f4aaf3d6c05f5178776d8af8c098d7f3b9eea9c25e13884ed890bca38697345a",
+      "sources/hf_qa/dependency_metadata/setup.py": "3280fde7567deb6eeb0b2fb3609058c0109498e0c9a334ed69f45ecea0d6c38e",
+      "sources/hf_qa/reference_only/README.md": "8aadb3b6ccbef25f8eace02132fa0eb0e1df3ca59363c545725d7284ef0fd334",
+      "sources/hf_qa/reference_only/LICENSE": "77fd4710def9ec3c0f6225800e0235f15a425abd4a8b03559127fcd782612049",
+      "sources/hf_qa/reference_only/examples/pytorch/question-answering/README.md": "fd370f0986c54fa5373b3e0e13a855d31a07866e60bad74066057644c2ba1839"
+    },
+    "profile": {
+      "requirements": [
+        "numpy==1.26.4",
+        "torch==2.9.0+cpu",
+        "transformers==4.57.1",
+        "datasets==3.6.0",
+        "accelerate==1.11.0",
+        "evaluate==0.4.6",
+        "scikit-learn==1.7.2",
+        "scipy==1.15.3",
+        "sentencepiece==0.2.1",
+        "protobuf==6.33.0",
+        "seqeval==1.2.2",
+        "pyarrow==20.0.0",
+        "pandas==2.3.3"
+      ],
+      "export": "native",
+      "arguments": [
+        "--model_name_or_path",
+        "{base_model}",
+        "--model_revision",
+        "30b0a37ccaaa32f332884b96992754e246e48c5f",
+        "--do_train",
+        "--use_cpu",
+        "true",
+        "--max_steps",
+        "2",
+        "--per_device_train_batch_size",
+        "2",
+        "--max_train_samples",
+        "32",
+        "--output_dir",
+        "{output}",
+        "--report_to",
+        "none",
+        "--save_strategy",
+        "no",
+        "--seed",
+        "42",
+        "--dataset_name",
+        "rajpurkar/squad",
+        "--max_seq_length",
+        "128",
+        "--doc_stride",
+        "32"
+      ],
+      "pretrained": {
+        "repository": "google/bert_uncased_L-2_H-128_A-2",
+        "revision": "30b0a37ccaaa32f332884b96992754e246e48c5f"
+      }
+    },
+    "worker_sha256": "9f6fe18d948874be9523d294f9a648563a37bc203831e9ba0a95d4e9bbf6ec33",
+    "runner_sha256": "558b5e77dca8b18aa9be32e346e53c671cb9e59e463996e36e5012d0da49afd5",
+    "data_directory": null
+  },
+  "generator_invoked": false,
+  "triton_validated": false,
+  "runtime_image_id": "sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce",
+  "native_serving_validated": false,
+  "source_modified": false,
+  "training_completed": true,
+  "checkpoint_files": [
+    "model.safetensors"
+  ],
+  "bundle_hashes": {
+    "config.json": "344849aa42aa6eb8909781d724719980bb98ee12c565b2e6470cd3136c2d3345",
+    "model.safetensors": "c259145425339bec96408d091a5a0aaf233c82b85f3f06734b09aa89ad2e3a65",
+    "requirements.txt": "bc4ac5afbe18de2024bdc42df919cf6dfd2337a8df69b0e8f092276769267c8d",
+    "special_tokens_map.json": "b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3",
+    "tokenizer.json": "b471fe70e2857943fdcb96b7e2dd17d18fd3cbf2e515901fcebe5b81777b20df",
+    "tokenizer_config.json": "e711904cac23112776b678356ccf702cf934babaa01125f698ac43bf9ad38e73",
+    "training/examples/pytorch/question-answering/requirements.txt": "d22f1a3e98228016b8c23b90ca9a398d9c051e8205cd5648960d636908c24bb6",
+    "training/examples/pytorch/question-answering/run_qa.py": "45fa7eb1c4f4feb850d08758d024f015f782297e5111e0857b52ed2de6f2f354",
+    "training/examples/pytorch/question-answering/trainer_qa.py": "73bb517b25cdd752f8cad292ca3cdf40f319e4580abb899d976dca38299483ab",
+    "training/examples/pytorch/question-answering/utils_qa.py": "e97b71070579835b53d1eed571e65d8bb43a9bb6f5021c9d4b3e0a452207bb28",
+    "training/pyproject.toml": "f4aaf3d6c05f5178776d8af8c098d7f3b9eea9c25e13884ed890bca38697345a",
+    "training/setup.py": "3280fde7567deb6eeb0b2fb3609058c0109498e0c9a334ed69f45ecea0d6c38e",
+    "vocab.txt": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"
+  },
+  "elapsed_seconds": 78.69,
+  "container_removed": true
+}

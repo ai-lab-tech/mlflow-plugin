@@ -1,0 +1,53 @@
+{
+  "id": "sk_mlp_training_curves",
+  "status": "trained_exported",
+  "stage": "complete",
+  "fingerprint": {
+    "source_hashes": {
+      "sources/sk_mlp_training_curves/training_source/examples/neural_networks/plot_mlp_training_curves.py": "7c119cb024512137ad1148a35fcab16774d7ad9cf852ca6a925d6f4e5b35e271",
+      "sources/sk_mlp_training_curves/dependency_metadata/pyproject.toml": "9035b0add4bed5730748437b18713f35a392974bfa0d72cc4c9c2f59fc9cf7d4",
+      "sources/sk_mlp_training_curves/reference_only/README.rst": "1bc3cbca989cde3cb9ac815d8ae604dc7273cab737f200c6fe7aa17eb0ec69d9",
+      "sources/sk_mlp_training_curves/reference_only/COPYING": "75684d16f4662ab842ed5af9482ac01939aee83c8243d89993616d959d3053f8"
+    },
+    "profile": {
+      "requirements": [
+        "numpy==1.26.4",
+        "scipy==1.15.3",
+        "scikit-learn==1.7.2",
+        "pandas==2.3.3",
+        "joblib==1.5.2",
+        "matplotlib==3.10.7",
+        "seaborn==0.13.2"
+      ],
+      "export": "captured",
+      "arguments": [],
+      "capture": [
+        "MLPClassifier",
+        "MinMaxScaler"
+      ],
+      "model_class": "MLPClassifier",
+      "preprocessors": [
+        "MinMaxScaler"
+      ],
+      "notes": "Final actual MLP fit (moons/Adam) and matching fitted scaler; entire original example runs."
+    },
+    "worker_sha256": "9f6fe18d948874be9523d294f9a648563a37bc203831e9ba0a95d4e9bbf6ec33",
+    "runner_sha256": "558b5e77dca8b18aa9be32e346e53c671cb9e59e463996e36e5012d0da49afd5",
+    "data_directory": null
+  },
+  "generator_invoked": false,
+  "triton_validated": false,
+  "runtime_image_id": "sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce",
+  "native_serving_validated": false,
+  "source_modified": false,
+  "training_completed": true,
+  "bundle_hashes": {
+    "MinMaxScaler.joblib": "15067a27da2269e81bc5f49e6be48138d363ca19edbdf7b93302f612ce59e1a6",
+    "model.joblib": "d4b33309f80946046b472a3c75dd38703422b99f26550aa875186990e339a2e4",
+    "requirements.txt": "3fc16de8e59d89891eedce6778a79f2e49a7812e0b8e8cff99a24ec0e5439d37",
+    "training/examples/neural_networks/plot_mlp_training_curves.py": "7c119cb024512137ad1148a35fcab16774d7ad9cf852ca6a925d6f4e5b35e271",
+    "training/pyproject.toml": "9035b0add4bed5730748437b18713f35a392974bfa0d72cc4c9c2f59fc9cf7d4"
+  },
+  "elapsed_seconds": 1.96,
+  "container_removed": true
+}

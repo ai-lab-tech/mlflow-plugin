@@ -19,6 +19,7 @@ triton-control = "mlflow_triton_control.deployment_client"
 include = ["mlflow_triton_control*"]
 
 [tool.ruff]
+extend-exclude = ["examples/data"]
 target-version = "py310"
 line-length = 88
 

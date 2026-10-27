@@ -2,7 +2,8 @@
 
 These examples exercise the new `sklearn.log_model`, `pytorch.log_model` and
 `transformers.log_model` wrappers with mandatory `input_example` requests.
-They reuse trained artifacts already present in the sibling generator repository.
+They use the trained artifacts committed in this repository under `examples/data`.
+Binary artifacts are tracked with Git LFS; see [data provenance](data/README.md).
 They do not train, download models, import training scripts, read benchmark request
 fixtures or expected answers, or use an LLM. The full runner below starts Triton for validation.
 
@@ -23,11 +24,19 @@ fixtures or expected answers, or use an LLM. The full runner below starts Triton
 
 ## Run all twelve, including real Triton serving
 
+After cloning, retrieve the tracked binary artifacts once from the repository root:
+
+```bash
+git lfs install --local
+git lfs pull
+```
+
+Both runners default to this checkout's `examples/data`; `--data-root` is only
+needed to override that location. No sibling generator repository is required.
 Docker must be running. From any working directory:
 
 ```bash
-python3 /home/ghost/git/mlflow-plugin/examples/run_real_models.py \
-  --data-root /home/ghost/git/triton-model-generator/benchmarks/data
+python3 /home/ghost/git/mlflow-plugin/examples/run_real_models.py
 ```
 
 Use the script in this repository, not the old `/tmp/triton-control-log-model-wrapper`
@@ -102,12 +111,10 @@ From the plugin directory:
 python examples/real_models.py --list
 
 python examples/real_models.py \
-  --data-root /home/ghost/git/triton-model-generator/benchmarks/data \
   --output /tmp/mlflow-real-examples-12
 
 # Or select one example, with a new output directory:
 python examples/real_models.py \
-  --data-root /home/ghost/git/triton-model-generator/benchmarks/data \
   --output /tmp/mlflow-custom-network \
   --case pytorch_custom_network
 ```
@@ -147,7 +154,6 @@ Use the full runner above to measure updated packaging and actual serving result
 
 ```bash
 python3 /home/ghost/git/mlflow-plugin/examples/run_real_models.py \
-  --data-root /home/ghost/git/triton-model-generator/benchmarks/data \
   --case sklearn_mixed_columns \
   --case huggingface_classification \
   --case huggingface_question_answering \

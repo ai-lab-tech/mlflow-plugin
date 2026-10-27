@@ -1,0 +1,36 @@
+{
+  "sources": [
+    {
+      "repository": "pytorch/examples",
+      "revision": "acc295dc7b90714f1bf47f06004fc19a7fe235c4",
+      "path": "dcgan/main.py",
+      "url": "https://raw.githubusercontent.com/pytorch/examples/acc295dc7b90714f1bf47f06004fc19a7fe235c4/dcgan/main.py",
+      "sha256": "4f6aef3527822a32bcca366e336e941a67d04081f66f568cc24a0a642b5f9555",
+      "bundle_path": "main.py"
+    }
+  ],
+  "training_evidence": {
+    "execution": "complete original CLI --dataset fake --niter 1 --dry-run; one GAN update",
+    "training_batches": 1,
+    "parameter_state_changed": true,
+    "initial_state_sha256": "551aee01b53071ab0083e5bb584fe3b4e5c30cf95394d23c8346b144de764395",
+    "trained_state_sha256": "7e72e41d11651decf99310806c6a34b5b83d108ee74620f59c80218be90ef134"
+  },
+  "input_shapes": [
+    [
+      128,
+      100,
+      1,
+      1
+    ]
+  ],
+  "input_dtypes": [
+    "float32"
+  ],
+  "producer_python": "3.14.4",
+  "artifact_files": {
+    "main.py": "4f6aef3527822a32bcca366e336e941a67d04081f66f568cc24a0a642b5f9555",
+    "netG_epoch_0.pth": "ce71b50e5eab59aa033c70e3db98fed6d3c590d08e8f02443e38ab733d43d7d8",
+    "requirements.txt": "0ea1a1e7a975391bcdb773832931ab94f1197038bf3fcab660c00f3df4e06ccb"
+  }
+}

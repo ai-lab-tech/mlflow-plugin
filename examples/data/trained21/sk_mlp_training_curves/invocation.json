@@ -1,0 +1,35 @@
+{
+  "argv": [
+    "/tmp/upstream-plvvehfv/examples/neural_networks/plot_mlp_training_curves.py"
+  ],
+  "cwd": "/tmp/upstream-plvvehfv/examples/neural_networks",
+  "repository": "scikit-learn/scikit-learn",
+  "revision": "25dee604bae18205b01548348388baf7a1cdfe0e",
+  "profile": {
+    "requirements": [
+      "numpy==1.26.4",
+      "scipy==1.15.3",
+      "scikit-learn==1.7.2",
+      "pandas==2.3.3",
+      "joblib==1.5.2",
+      "matplotlib==3.10.7",
+      "seaborn==0.13.2"
+    ],
+    "export": "captured",
+    "arguments": [],
+    "capture": [
+      "MLPClassifier",
+      "MinMaxScaler"
+    ],
+    "model_class": "MLPClassifier",
+    "preprocessors": [
+      "MinMaxScaler"
+    ],
+    "notes": "Final actual MLP fit (moons/Adam) and matching fitted scaler; entire original example runs."
+  },
+  "source_hashes": {
+    "examples/neural_networks/plot_mlp_training_curves.py": "7c119cb024512137ad1148a35fcab16774d7ad9cf852ca6a925d6f4e5b35e271",
+    "pyproject.toml": "9035b0add4bed5730748437b18713f35a392974bfa0d72cc4c9c2f59fc9cf7d4"
+  },
+  "python": "3.11.17 (main, Oct  6 2026, 02:02:21) [GCC 14.2.0]"
+}

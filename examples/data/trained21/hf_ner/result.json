@@ -1,0 +1,99 @@
+{
+  "id": "hf_ner",
+  "status": "trained_exported",
+  "stage": "complete",
+  "fingerprint": {
+    "source_hashes": {
+      "sources/hf_ner/training_source/examples/pytorch/token-classification/run_ner.py": "6b8a39ae5241a60d156cf7bc066a6e8cd3b5ac00d084b3b7c9f70c983ea0f9cf",
+      "sources/hf_ner/dependency_metadata/examples/pytorch/token-classification/requirements.txt": "15dfd5ac882103475dd7955e89156b4c21a33c218f4ae52c08a739a554bbd7a2",
+      "sources/hf_ner/dependency_metadata/pyproject.toml": "f4aaf3d6c05f5178776d8af8c098d7f3b9eea9c25e13884ed890bca38697345a",
+      "sources/hf_ner/dependency_metadata/setup.py": "3280fde7567deb6eeb0b2fb3609058c0109498e0c9a334ed69f45ecea0d6c38e",
+      "sources/hf_ner/reference_only/README.md": "8aadb3b6ccbef25f8eace02132fa0eb0e1df3ca59363c545725d7284ef0fd334",
+      "sources/hf_ner/reference_only/LICENSE": "77fd4710def9ec3c0f6225800e0235f15a425abd4a8b03559127fcd782612049",
+      "sources/hf_ner/reference_only/examples/pytorch/token-classification/README.md": "ea8dcabb17e0e748f9505ad99bee8e1fdc247909d2b84f5a5bd01ca3730942be"
+    },
+    "profile": {
+      "requirements": [
+        "numpy==1.26.4",
+        "torch==2.9.0+cpu",
+        "transformers==4.57.1",
+        "datasets==3.6.0",
+        "accelerate==1.11.0",
+        "evaluate==0.4.6",
+        "scikit-learn==1.7.2",
+        "scipy==1.15.3",
+        "sentencepiece==0.2.1",
+        "protobuf==6.33.0",
+        "seqeval==1.2.2",
+        "pyarrow==20.0.0",
+        "pandas==2.3.3"
+      ],
+      "export": "native",
+      "arguments": [
+        "--model_name_or_path",
+        "{base_model}",
+        "--model_revision",
+        "30b0a37ccaaa32f332884b96992754e246e48c5f",
+        "--do_train",
+        "--use_cpu",
+        "true",
+        "--max_steps",
+        "2",
+        "--per_device_train_batch_size",
+        "2",
+        "--max_train_samples",
+        "32",
+        "--output_dir",
+        "{output}",
+        "--report_to",
+        "none",
+        "--save_strategy",
+        "no",
+        "--seed",
+        "42",
+        "--dataset_name",
+        "tomaarsen/conll2003",
+        "--max_seq_length",
+        "128",
+        "--dataset_config_name",
+        "default",
+        "--text_column_name",
+        "tokens",
+        "--label_column_name",
+        "ner_tags"
+      ],
+      "pretrained": {
+        "repository": "google/bert_uncased_L-2_H-128_A-2",
+        "revision": "30b0a37ccaaa32f332884b96992754e246e48c5f"
+      },
+      "notes": "Unchanged original run_ner.py requires Sequence[ClassLabel] or string labels. This CoNLL-2003 publication preserves ClassLabel names. Dataset schema checked at revision 3a0c0677d3177b6122fceed3239dda7a5de6a514; the upstream CLI does not expose a dataset revision option."
+    },
+    "worker_sha256": "9f6fe18d948874be9523d294f9a648563a37bc203831e9ba0a95d4e9bbf6ec33",
+    "runner_sha256": "558b5e77dca8b18aa9be32e346e53c671cb9e59e463996e36e5012d0da49afd5",
+    "data_directory": null
+  },
+  "generator_invoked": false,
+  "triton_validated": false,
+  "runtime_image_id": "sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce",
+  "native_serving_validated": false,
+  "source_modified": false,
+  "training_completed": true,
+  "checkpoint_files": [
+    "model.safetensors"
+  ],
+  "bundle_hashes": {
+    "config.json": "b75d960cf6b127760e10cf4834855fbdc18284bfc035272b1a7ddedb0d43a913",
+    "model.safetensors": "63ded28e7b299632e8e88fba65c3ed4286591fffa2242455e81af077b6aaa1c2",
+    "requirements.txt": "bc4ac5afbe18de2024bdc42df919cf6dfd2337a8df69b0e8f092276769267c8d",
+    "special_tokens_map.json": "b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3",
+    "tokenizer.json": "79ea220416a57ca8acdf069d71875d5d2ddadef66021aeb6c120a7c546c04344",
+    "tokenizer_config.json": "e711904cac23112776b678356ccf702cf934babaa01125f698ac43bf9ad38e73",
+    "training/examples/pytorch/token-classification/requirements.txt": "15dfd5ac882103475dd7955e89156b4c21a33c218f4ae52c08a739a554bbd7a2",
+    "training/examples/pytorch/token-classification/run_ner.py": "6b8a39ae5241a60d156cf7bc066a6e8cd3b5ac00d084b3b7c9f70c983ea0f9cf",
+    "training/pyproject.toml": "f4aaf3d6c05f5178776d8af8c098d7f3b9eea9c25e13884ed890bca38697345a",
+    "training/setup.py": "3280fde7567deb6eeb0b2fb3609058c0109498e0c9a334ed69f45ecea0d6c38e",
+    "vocab.txt": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"
+  },
+  "elapsed_seconds": 65.66,
+  "container_removed": true
+}

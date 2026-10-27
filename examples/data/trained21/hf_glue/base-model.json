@@ -1,0 +1,9 @@
+{
+  "repository": "google/bert_uncased_L-2_H-128_A-2",
+  "revision": "30b0a37ccaaa32f332884b96992754e246e48c5f",
+  "files_sha256": {
+    "model.safetensors": "7fb69ad9f6866d8983183c930e33828f326470bf6ad8bbb2ad4ed957a92e9414",
+    "vocab.txt": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3",
+    "config.json": "508e1f01aae55d73355cbdd82609be2f43ba5a0d3428837adbe56cf8391f8b39"
+  }
+}

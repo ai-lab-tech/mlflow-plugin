@@ -1,0 +1,32 @@
+{
+  "sources": [
+    {
+      "repository": "pytorch/tutorials",
+      "revision": "c8ccbbf7fcb8cb71adda1b957bd6bab50e29c2e6",
+      "path": "beginner_source/examples_nn/polynomial_module.py",
+      "url": "https://raw.githubusercontent.com/pytorch/tutorials/c8ccbbf7fcb8cb71adda1b957bd6bab50e29c2e6/beginner_source/examples_nn/polynomial_module.py",
+      "sha256": "75f22bc886562a2efb5ac14b01019d833efe3ce4f3aa9936bf50981935af0b9e",
+      "bundle_path": "polynomial_module.py"
+    }
+  ],
+  "training_evidence": {
+    "execution": "complete original training program, unchanged",
+    "parameter_state_changed": true,
+    "initial_state_sha256": "0db354036f6ac9b8cdeaf3493bcf07ae2dedcbc15a720220721b5dc09f2d184a",
+    "trained_state_sha256": "6689b2ba4dbdbf819a142d035965418c68c093e51a628780c226e64c4e371f62"
+  },
+  "input_shapes": [
+    [
+      256
+    ]
+  ],
+  "input_dtypes": [
+    "float32"
+  ],
+  "producer_python": "3.14.4",
+  "artifact_files": {
+    "polynomial_module.py": "75f22bc886562a2efb5ac14b01019d833efe3ce4f3aa9936bf50981935af0b9e",
+    "requirements.txt": "0ea1a1e7a975391bcdb773832931ab94f1197038bf3fcab660c00f3df4e06ccb",
+    "weights.pt": "9e34cb55e854ba71646b733272794cf0ef90e65da563542a242699185c50066a"
+  }
+}
