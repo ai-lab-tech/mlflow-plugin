@@ -13,6 +13,7 @@ import mlflow
 from mlflow.models import Model, infer_signature
 
 from . import _runtime
+from ._architecture import validate_init_kwargs, write_architecture
 from ._request import write_request_example
 from ._signature import config_text, contract_from_signature, validate_serving_options
 
@@ -157,6 +158,7 @@ def prepare_model(
     *,
     input_example,
     signature=None,
+    architecture_init_kwargs=None,
     triton_model_name="model",
     device="cpu",
     **save_kwargs,
@@ -165,6 +167,7 @@ def prepare_model(
     _validate_inputs(
         flavor, model, input_example, signature, triton_model_name, device, save_kwargs
     )
+    validate_init_kwargs(architecture_init_kwargs)
     destination = Path(path)
     if destination.exists() or destination.is_symlink():
         raise ValueError("Destination already exists: " + str(destination))
@@ -187,6 +190,7 @@ def prepare_model(
         metadata, contract = _validate_saved_model(
             native, flavor, input_example, signature
         )
+        write_architecture(native, flavor, model, architecture_init_kwargs)
         package = _assemble_repository(
             native,
             staging,

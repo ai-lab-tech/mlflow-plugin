@@ -384,3 +384,34 @@ without changing input values. Outputs are requested as binary in that case.
 Example files contain the supplied input values, just like MLflow's stored input
 example; use non-sensitive examples. The direct `triton.log_model()` API for
 pre-existing repositories does not generate requests because it takes no input example.
+
+### Architecture information without loading weights
+
+PyTorch and Transformers wrappers automatically include `architecture.json` in the
+MLflow artifact and its self-contained Triton `1/artifact/` copy. Read this JSON
+without importing custom model code or loading weights. It records the model class,
+module classes, parameter/buffer shapes and dtypes (never tensor values), and relative
+paths to packaged Python and configuration files. Transformers reports component
+classes such as the tokenizer; its saved `config.json` contains model configuration.
+
+| Argument | Required | Meaning |
+| --- | --- | --- |
+| `architecture_init_kwargs` | No | JSON object documenting constructor arguments, supplied by the caller. Defaults to unknown; never guessed or passed to the constructor. |
+
+```python
+mlflow_triton.pytorch.log_model(
+    model,
+    input_example=example,
+    code_paths=["custom_network.py"],
+    architecture_init_kwargs={"input_size": 16, "hidden_size": 32},
+)
+```
+
+The same optional argument is supported by `mlflow_triton.transformers.log_model`.
+Include only non-sensitive architecture settings, never credentials or training data.
+This is documentation, not an automatic reconstruction recipe: module structure
+cannot describe arbitrary `forward()` logic or preprocessing. Constructor settings
+are caller-declared and are not verified against the model. Required custom code
+must still be packaged with the native flavor's code options. Existing artifacts
+are unchanged; the report is generated on subsequent logging. Serving inputs,
+outputs, weights and `config.pbtxt` are unaffected.

@@ -24,6 +24,7 @@ from mlflow_triton import (
     transformers,
     triton,
 )
+from mlflow_triton._architecture import validate_init_kwargs, write_architecture
 from mlflow_triton._signature import config_text, contract_from_signature, model_config
 from sklearn.linear_model import LinearRegression
 from sklearn.pipeline import Pipeline
@@ -397,6 +398,14 @@ class LoggingWrapperTests(unittest.TestCase):
             input_example=values,
             pip_requirements=["torch==" + torch.__version__],
         )
+        report = json.loads((path / "architecture.json").read_text())
+        self.assertEqual(report["model_class"], "torch.nn.modules.linear.Linear")
+        self.assertEqual(report["init_kwargs_origin"], "unknown")
+        self.assertEqual(report["tensors"][0]["shape"], [1, 2])
+        self.assertEqual(
+            (path / "architecture.json").read_bytes(),
+            (path / "model_repository/model/1/artifact/architecture.json").read_bytes(),
+        )
         restored = mlflow.pytorch.load_model(str(path))
         for key, tensor in restored.state_dict().items():
             torch.testing.assert_close(tensor, original[key], rtol=0, atol=0)
@@ -425,11 +434,15 @@ class LoggingWrapperTests(unittest.TestCase):
             result = transformers.log_model(
                 pipeline,
                 input_example=["hello"],
+                architecture_init_kwargs={"hidden_size": 8},
                 task="text-generation",
                 model_config={"max_new_tokens": 8},
                 code_paths=["architecture.py"],
             )
         self.assertIs(result, sentinel)
+        self.assertEqual(
+            log.call_args.kwargs["architecture_init_kwargs"], {"hidden_size": 8}
+        )
         self.assertIs(log.call_args.args[1], pipeline)
         self.assertEqual(log.call_args.kwargs["model_config"], {"max_new_tokens": 8})
         self.assertEqual(log.call_args.kwargs["code_paths"], ["architecture.py"])
@@ -464,6 +477,11 @@ class LoggingWrapperTests(unittest.TestCase):
             input_example=np.array([[1.0]], dtype=np.float32),
             code_paths=[str(source)],
             pip_requirements=["torch", "numpy"],
+        )
+        report = json.loads((path / "architecture.json").read_text())
+        self.assertEqual(report["model_class"], "custom_network.OffsetNetwork")
+        self.assertTrue(
+            any(name.endswith("custom_network.py") for name in report["code_files"])
         )
         source.unlink()
         script = (
@@ -553,9 +571,36 @@ class LoggingWrapperTests(unittest.TestCase):
                 str(path / "model_repository/model/1/artifact")
             )
             self.assertEqual(pyfunc.predict(["hello"]), embedded.predict(["hello"]))
+        report = json.loads((path / "architecture.json").read_text())
+        self.assertTrue(report["model_class"].endswith("GPT2LMHeadModel"))
+        self.assertIn("tokenizer", report["components"])
+        self.assertTrue(report["config_files"])
         signature = Model.load(path / "MLmodel").signature
         self.assertIsNotNone(signature.inputs)
         self.assertIsNotNone(signature.outputs)
+
+    def test_architecture_records_explicit_constructor_settings_without_loading(self):
+        # Arrange
+        native = self.root / "native"
+        native.mkdir()
+        settings = {"hidden_size": 32, "bias": False}
+
+        # Act
+        write_architecture(native, "pytorch", object(), settings)
+        report = json.loads((native / "architecture.json").read_text())
+
+        # Assert
+        self.assertEqual(report["init_kwargs"], settings)
+        self.assertEqual(report["init_kwargs_origin"], "user_supplied")
+
+    def test_architecture_rejects_non_json_constructor_settings(self):
+        # Arrange
+        invalid = [[], {"tensor": object()}, {"size": float("nan")}]
+
+        # Act / Assert
+        for settings in invalid:
+            with self.subTest(settings=settings), self.assertRaises(ValueError):
+                validate_init_kwargs(settings)
 
     def named_tensor_fixture(self):
         inputs = {
