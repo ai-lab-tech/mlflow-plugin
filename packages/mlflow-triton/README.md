@@ -123,7 +123,8 @@ or establish GPU correctness. The direct `triton.log_model()` API below remains 
 
 ## Log API reference
 
-The three framework wrappers have these public entry points:
+The three framework wrappers have these public entry points (common keyword
+options are abbreviated below; the Python signatures expose them explicitly):
 
 ```python
 sklearn.log_model(sk_model, *, input_example, **kwargs)
@@ -321,3 +322,19 @@ example runner, not by starting a server inside log_model().
 For optional Triton Control deployment, install
 [mlflow-triton-control](https://github.com/ai-lab-tech/mlflow-plugin/blob/main/packages/mlflow-triton-control/README.md). A complete Triton
 model repository is the handoff to any chosen deployment tooling.
+
+## Packaging and concurrent loading
+
+Packaging checks the target name and device before saving or predicting. It builds
+in a temporary sibling of the destination and renames the completed directory into
+place, cleaning up staging on failure. The native artifact and independent serving
+copy remain separate; intermediate full-package copies are avoided. MLflow may
+still copy/upload the completed artifact during logging. `TMPDIR` selects the outer
+logging workspace; choose a disk with enough room for both model copies and MLflow's
+own temporary storage.
+
+Calls through the runtime's `load_predictor` are serialized while MLflow device and
+offline environment settings are temporarily applied, including restoration after
+failure. This lock does not protect unrelated code that modifies `os.environ`,
+direct MLflow loads, or separately imported runtime copies. Coordinate those callers
+or use separate processes. Prediction requests are not serialized by this lock.

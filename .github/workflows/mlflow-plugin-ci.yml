@@ -78,9 +78,44 @@ jobs:
           mlflow deployments help -t triton-control
           python scripts/test_packages.py --package control
 
+  framework-tests:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mlflow: ["3.14.0", "latest"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - name: Install CPU framework test dependencies
+        env:
+          MLFLOW_VERSION: ${{ matrix.mlflow }}
+        run: |
+          python -m pip install "torch==2.9.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "transformers==4.57.1" "tritonclient[grpc]"
+          if [ "$MLFLOW_VERSION" = latest ]; then
+            python -m pip install dist/core/*.whl "mlflow>=3.14,<4"
+          else
+            python -m pip install dist/core/*.whl "mlflow==$MLFLOW_VERSION"
+          fi
+          python -m pip check
+      - name: Run core tests with framework coverage required
+        env:
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
+          MLFLOW_DISABLE_AGENT_HINT: "1"
+        run: python scripts/test_packages.py --package core --require-core-only --fail-on-skip
+
   publish-core:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [build, test]
+    needs: [build, test, framework-tests]
     runs-on: ubuntu-latest
     environment: pypi-core
     permissions:
@@ -96,7 +131,7 @@ jobs:
 
   publish-control:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [test, publish-core]
+    needs: [test, framework-tests, publish-core]
     runs-on: ubuntu-latest
     environment: pypi-control
     permissions:

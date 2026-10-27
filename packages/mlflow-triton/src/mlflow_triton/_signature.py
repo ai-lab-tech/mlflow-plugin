@@ -107,15 +107,19 @@ def contract_from_signature(signature, flavor):
     }
 
 
-def config_text(name, contract, device):
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", name):
+def validate_serving_options(name, flavor, device):
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", name):
         raise ValueError(
             "triton_model_name must start with a letter/underscore and contain letters, digits, _ or -"
         )
     if device not in ("cpu", "gpu"):
         raise ValueError("device must be cpu or gpu")
-    if contract["flavor"] == "sklearn" and device != "cpu":
+    if flavor == "sklearn" and device != "cpu":
         raise ValueError("The sklearn wrapper requires device=cpu")
+
+
+def config_text(name, contract, device):
+    validate_serving_options(name, contract["flavor"], device)
     lines = [f"name: {json.dumps(name)}", 'backend: "python"', "max_batch_size: 0"]
     for direction in ("input", "output"):
         lines.append(direction + " [")

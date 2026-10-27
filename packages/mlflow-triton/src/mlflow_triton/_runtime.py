@@ -5,10 +5,15 @@ Only MLflow's saved prediction interface is executed; training code is not run.
 
 import json
 import os
+import threading
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+# Serializes this module's temporary environment overrides. External callers that
+# mutate os.environ or load models directly must coordinate separately.
+_LOAD_LOCK = threading.RLock()
 
 
 def checked_array(value, spec):
@@ -118,16 +123,17 @@ def load_predictor(path, flavor, device="cpu"):
         "TRANSFORMERS_OFFLINE": "1",
         "MLFLOW_HUGGINGFACE_USE_DEVICE_MAP": "false",
     }
-    previous = {key: os.environ.get(key) for key in variables}
-    try:
-        os.environ.update(variables)
-        return mlflow.pyfunc.load_model(str(path))
-    finally:
-        for key, value in previous.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+    with _LOAD_LOCK:
+        previous = {key: os.environ.get(key) for key in variables}
+        try:
+            os.environ.update(variables)
+            return mlflow.pyfunc.load_model(str(path))
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
 
 class TritonPythonModel:

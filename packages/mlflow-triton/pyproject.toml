@@ -21,3 +21,6 @@ Issues = "https://github.com/ai-lab-tech/mlflow-plugin/issues"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["mlflow_triton*"]
+
+[tool.setuptools.package-data]
+mlflow_triton = ["py.typed"]

@@ -192,6 +192,62 @@ class LoggingWrapperTests(unittest.TestCase):
             )
         self.assertFalse(destination.exists())
 
+    def test_invalid_serving_options_fail_before_saving(self):
+        # Arrange
+        cases = [
+            {"device": "invalid"},
+            {"device": "gpu"},
+            {"triton_model_name": "bad/name"},
+            {"triton_model_name": ""},
+        ]
+        for options in cases:
+            with (
+                self.subTest(options=options),
+                patch("mlflow.sklearn.save_model") as save,
+            ):
+                # Act / Assert
+                with self.assertRaises(ValueError):
+                    sklearn.log_model(
+                        fixture_model(), input_example=self.example, **options
+                    )
+                save.assert_not_called()
+
+    def test_partial_serving_copy_is_cleaned_up(self):
+        # Arrange
+        destination = self.root / "saved"
+
+        def fail_copy(source, target, **kwargs):
+            Path(target).mkdir()
+            (Path(target) / "partial.bin").write_bytes(b"partial")
+            raise OSError("disk full")
+
+        # Act / Assert
+        with patch.object(_logging.shutil, "copytree", side_effect=fail_copy):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                self.prepare()
+        self.assertFalse(destination.exists())
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_publish_failure_cleans_staging_and_preserves_existing_target(self):
+        # Arrange
+        destination = self.root / "saved"
+        real_assemble = _logging._assemble_repository
+
+        def create_conflict(*args, **kwargs):
+            package = real_assemble(*args, **kwargs)
+            destination.mkdir()
+            (destination / "existing.txt").write_text("keep")
+            return package
+
+        # Act / Assert
+        with patch.object(
+            _logging, "_assemble_repository", side_effect=create_conflict
+        ):
+            with self.assertRaises(FileExistsError):
+                self.prepare()
+        self.assertEqual((destination / "existing.txt").read_text(), "keep")
+        self.assertEqual(list(self.root.iterdir()), [destination])
+
     def test_real_log_register_and_load_keeps_both_flavors(self):
         tracking, registry = mlflow.get_tracking_uri(), mlflow.get_registry_uri()
         try:
