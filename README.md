@@ -11,6 +11,14 @@
 [Deployment integration](packages/mlflow-triton-control/README.md) ·
 [Contributing](CONTRIBUTING.md)
 
+> **For demos and proofs of concept — not production-ready serving.**
+>
+> **Before production use, an ML Engineer must review, validate and optimize the
+> serving implementation and, where needed, convert the model to a suitable
+> production format/backend.** The generated Triton Python backend uses MLflow's
+> prediction interface as a starting point. Successful example tests do not
+> establish production readiness, throughput, latency or resource efficiency.
+
 Log a fitted sklearn pipeline, a PyTorch module or a Hugging Face pipeline with
 an example request. The core package preserves the native MLflow model and adds
 a complete Triton Python-backend model directory: configuration, serving code,

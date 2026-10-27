@@ -1,5 +1,13 @@
 # mlflow-triton
 
+> **For demos and proofs of concept — not production-ready serving.**
+>
+> **Before production use, an ML Engineer must review, validate and optimize the
+> serving implementation and, where needed, convert the model to a suitable
+> production format/backend.** The generated Triton Python backend uses MLflow's
+> prediction interface as a starting point. Successful example tests do not
+> establish production readiness, throughput, latency or resource efficiency.
+
 Core MLflow logging wrappers for sklearn, PyTorch and Hugging Face. Generate a
 portable Triton repository for Data Scientist demos and PoCs, without requiring
 Triton Control, deployment credentials or an LLM. Production optimization remains
