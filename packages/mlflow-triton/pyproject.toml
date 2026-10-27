@@ -12,6 +12,12 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = ["mlflow>=3.14,<4"]
 
+[project.urls]
+Homepage = "https://github.com/ai-lab-tech/mlflow-plugin"
+Documentation = "https://github.com/ai-lab-tech/mlflow-plugin/blob/main/packages/mlflow-triton/README.md"
+Repository = "https://github.com/ai-lab-tech/mlflow-plugin"
+Issues = "https://github.com/ai-lab-tech/mlflow-plugin/issues"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["mlflow_triton*"]

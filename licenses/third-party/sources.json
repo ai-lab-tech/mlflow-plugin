@@ -1,0 +1,20 @@
+{
+  "scikit-learn": {
+    "url": "https://raw.githubusercontent.com/scikit-learn/scikit-learn/25dee604bae18205b01548348388baf7a1cdfe0e/COPYING"
+  },
+  "pytorch-examples": {
+    "url": "https://raw.githubusercontent.com/pytorch/examples/acc295dc7b90714f1bf47f06004fc19a7fe235c4/LICENSE"
+  },
+  "pytorch-tutorials": {
+    "url": "https://raw.githubusercontent.com/pytorch/tutorials/c8ccbbf7fcb8cb71adda1b957bd6bab50e29c2e6/LICENSE"
+  },
+  "jcjohnson-pytorch-examples": {
+    "url": "https://raw.githubusercontent.com/jcjohnson/pytorch-examples/0003fcdc606a79951e53bf8f46f8574fa4739f23/LICENSE"
+  },
+  "transformers": {
+    "url": "https://raw.githubusercontent.com/huggingface/transformers/8cb5963cc22174954e7dca2c0a3320b7dc2f4edc/LICENSE"
+  },
+  "trl": {
+    "url": "https://raw.githubusercontent.com/huggingface/trl/04fd1203af4fc1e629f58e0ac0d0c5bb95f82a45/LICENSE"
+  }
+}

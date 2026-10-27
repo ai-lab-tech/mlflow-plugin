@@ -44,3 +44,13 @@ If core publishes but Control fails, fix the external publishing problem and
 rerun failed jobs. Do not replace an already published version. Code fixes require
 a new shared version and tag. Creating these files does not publish a release or
 configure the external Trusted Publishers.
+
+## Public repository preparation
+
+The repository files do not configure GitHub settings. Before the first public
+release, maintainers should enable private vulnerability reporting, select branch
+protection/review rules, and configure the PyPI environments described above.
+Resolve the specific outstanding dataset redistribution review in
+[third-party notices](THIRD_PARTY_NOTICES.md), including the existing Git/LFS history.
+Review history for credentials before changing visibility; ignore patterns only
+prevent future accidental additions and do not scrub previous commits.

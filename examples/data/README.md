@@ -29,3 +29,9 @@ Legacy `independent-inputs.npz` files are retained as source data but are not us
 by our examples. Example requests are defined in `../real_models.py`, and expected
 serving outputs are computed from the saved native model during each run.
 Generated MLflow packages, caches and Triton logs stay outside Git on the data disk.
+
+## Licenses
+
+See [third-party notices](../../THIRD_PARTY_NOTICES.md) for pinned upstream source
+licenses, pretrained-model attribution and the outstanding derived-artifact
+redistribution review. The root project license does not relicense this dataset.

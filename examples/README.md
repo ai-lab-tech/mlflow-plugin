@@ -36,10 +36,10 @@ Both runners default to this checkout's `examples/data`; `--data-root` is only
 needed to override that location. An alternative data root must use the same
 `<case-name>/` layout. All 13 cases, including custom models, are direct children
 of this single data directory. No sibling generator repository is required.
-Docker must be running. From any working directory:
+Docker must be running. From the repository root:
 
 ```bash
-python3 /home/ghost/git/mlflow-plugin/examples/run_real_models.py
+python examples/run_real_models.py
 ```
 
 Configure a storage directory suitable for your machine. For example, on a
@@ -66,8 +66,7 @@ scratch and host temporary files go under the chosen run directory.
 
 Docker images, build cache and serving-container scratch remain in Docker's
 configured data directory, which the runner reports but does not change.
-On the current workstation this is `/mnt/container-data/docker`. Other machines
-may configure Docker storage differently. Previous test results are not moved.
+Configure Docker storage separately if its current disk has insufficient space. Previous test results are not moved.
 
 The launcher first prepares CPU Triton images with Python 3.11 and 3.14 and
 matching Python backend stubs. It reuses its existing image tags on later runs.
@@ -176,7 +175,7 @@ Use the full runner above to measure updated packaging and actual serving result
 `--case` is repeatable. For the four failures from the first serving run:
 
 ```bash
-python3 /home/ghost/git/mlflow-plugin/examples/run_real_models.py \
+python examples/run_real_models.py \
   --case sklearn_mixed_columns \
   --case huggingface_classification \
   --case huggingface_question_answering \

@@ -1,0 +1,28 @@
+name: Bug report
+description: Report a reproducible packaging or serving problem
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: "Do not include secrets or private model data. Report vulnerabilities through SECURITY.md."
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Package, Python, MLflow, framework and Triton versions; CPU or GPU.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Minimal code or command and whether failure happens during logging, local validation, or actual Triton serving.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+      description: Include relevant error output with credentials and private paths removed.
+    validations:
+      required: true
