@@ -35,21 +35,38 @@ class ExampleRunnerTests(unittest.TestCase):
 
     def test_configurable_output_paths_and_precedence(self):
         with tempfile.TemporaryDirectory() as tmp:
+            # Arrange
             root = Path(tmp)
+            cases = [
+                ("environment", {}, root / "env", True),
+                ("cli_root", {"output_root": root / "cli"}, root / "cli", True),
+                ("exact_output", {"output": root / "exact"}, root / "exact", False),
+                (
+                    "exact_over_root",
+                    {"output": root / "exact", "output_root": root / "cli"},
+                    root / "exact",
+                    False,
+                ),
+            ]
             with patch.dict(
                 runner.os.environ, {"MLFLOW_TRITON_TEST_ROOT": str(root / "env")}
             ):
-                self.assertEqual(runner.test_output_path().parent, root / "env")
-                self.assertEqual(
-                    runner.test_output_path(output_root=root / "cli").parent,
-                    root / "cli",
-                )
-                self.assertEqual(
-                    runner.test_output_path(output=root / "exact"), root / "exact"
-                )
-            with patch.dict(runner.os.environ, {"MLFLOW_TRITON_TEST_ROOT": ""}):
-                with self.assertRaisesRegex(ValueError, "Choose test storage"):
-                    runner.test_output_path()
+                for name, options, expected, compare_parent in cases:
+                    with self.subTest(case=name):
+                        # Act
+                        actual = runner.test_output_path(**options)
+
+                        # Assert
+                        self.assertEqual(
+                            actual.parent if compare_parent else actual, expected
+                        )
+
+    def test_missing_output_configuration_is_rejected(self):
+        # Arrange
+        with patch.dict(runner.os.environ, {"MLFLOW_TRITON_TEST_ROOT": ""}):
+            # Act / Assert
+            with self.assertRaisesRegex(ValueError, "Choose test storage"):
+                runner.test_output_path()
 
     def test_selected_case_and_packaging_tmp_are_on_output_disk(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -82,7 +99,10 @@ class ExampleRunnerTests(unittest.TestCase):
                 ) as execute,
                 patch.object(runner, "validate_serving") as serve,
             ):
-                self.assertEqual(runner.main(), 1)
+                # Act
+                result = runner.main()
+            # Assert
+            self.assertEqual(result, 1)
             commands = [call.args[0] for call in execute.call_args_list]
             containers = [cmd for cmd in commands if cmd[:2] == ["docker", "run"]]
             self.assertEqual(len(containers), 1)
@@ -96,7 +116,7 @@ class ExampleRunnerTests(unittest.TestCase):
             self.assertEqual(rows[0]["triton_validation"], "blocked_by_local_failure")
             serve.assert_not_called()
 
-    def test_gpu_requirements_and_build_do_not_reuse_cpu_runtime(self):
+    def test_gpu_requirements_do_not_reuse_cpu_wheels(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             requirements = root / runner.GROUPS["pytorch"][1]
@@ -108,9 +128,13 @@ class ExampleRunnerTests(unittest.TestCase):
             self.assertIn("torch==2.14.1\n", gpu)
             self.assertNotIn("+cpu", gpu)
             self.assertNotIn("whl/cpu", gpu)
-        source = runner.dockerfile(
-            "nvcr.io/nvidia/tritonserver:26.06-py3", "3.11", "gpu"
-        )
+
+    def test_gpu_build_enables_cuda(self):
+        # Arrange
+        image = "nvcr.io/nvidia/tritonserver:26.06-py3"
+
+        # Act
+        source = runner.dockerfile(image, "3.11", "gpu")
         self.assertIn("TRITON_ENABLE_GPU=ON", source)
         self.assertNotIn("CUDA_VISIBLE_DEVICES=-1", source)
 

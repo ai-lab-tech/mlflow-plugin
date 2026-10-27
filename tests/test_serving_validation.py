@@ -52,79 +52,90 @@ class ServingValidationTests(unittest.TestCase):
         fail_gpu=False,
         fail_reference=False,
     ):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            row = {
-                "case": "example",
-                "serving_path": str(root / "model"),
-                "fixture_path": str(root / "fixture.npz"),
-            }
-            options = SimpleNamespace(
-                timeout=10, startup_timeout=5, inference_timeout=5, device=device
-            )
-            commands = []
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        row = {
+            "case": "example",
+            "serving_path": str(root / "model"),
+            "fixture_path": str(root / "fixture.npz"),
+        }
+        options = SimpleNamespace(
+            timeout=10, startup_timeout=5, inference_timeout=5, device=device
+        )
+        commands = []
 
-            def run(command, **kwargs):
-                commands.append(command)
-                if fail_reference and "--native-gpu-reference" in command:
-                    raise subprocess.CalledProcessError(1, command)
-                if fail_gpu and any(
-                    "torch.cuda.is_available()" in part for part in command
-                ):
-                    raise subprocess.CalledProcessError(1, command)
-                if fail_client and "/validation.py" in command:
-                    raise subprocess.CalledProcessError(1, command)
-                return subprocess.CompletedProcess(command, 0)
-
-            with (
-                patch.object(serving.subprocess, "run", side_effect=run),
-                patch.object(
-                    serving.subprocess,
-                    "check_output",
-                    side_effect=[
-                        version,
-                        "libpython3.11.so",
-                        json.dumps(
-                            {
-                                "native_gpu_vs_cpu": {"status": "failed"},
-                                "triton_vs_native_gpu": {"status": "passed"},
-                                "triton_vs_cpu": {"status": "passed"},
-                            }
-                        ),
-                    ],
-                ),
+        def run(command, **kwargs):
+            commands.append(command)
+            if fail_reference and "--native-gpu-reference" in command:
+                raise subprocess.CalledProcessError(1, command)
+            if fail_gpu and any(
+                "torch.cuda.is_available()" in part for part in command
             ):
-                result = serving.validate_serving(
-                    row,
-                    "runtime:test",
-                    "3.11",
-                    root / "requirements.txt",
-                    root / "result",
-                    options,
-                )
-            self.assertTrue(any(c[:3] == ["docker", "rm", "-f"] for c in commands))
-            self.assertTrue((root / "result/result.json").is_file())
-            return result, commands
+                raise subprocess.CalledProcessError(1, command)
+            if fail_client and "/validation.py" in command:
+                raise subprocess.CalledProcessError(1, command)
+            return subprocess.CompletedProcess(command, 0)
+
+        with (
+            patch.object(serving.subprocess, "run", side_effect=run),
+            patch.object(
+                serving.subprocess,
+                "check_output",
+                side_effect=[
+                    version,
+                    "libpython3.11.so",
+                    json.dumps(
+                        {
+                            "native_gpu_vs_cpu": {"status": "failed"},
+                            "triton_vs_native_gpu": {"status": "passed"},
+                            "triton_vs_cpu": {"status": "passed"},
+                        }
+                    ),
+                ],
+            ),
+        ):
+            result = serving.validate_serving(
+                row,
+                "runtime:test",
+                "3.11",
+                root / "requirements.txt",
+                root / "result",
+                options,
+            )
+        return result, commands, root / "result/result.json"
 
     def test_success_requires_real_client_command(self):
-        result, commands = self.run_scenario()
+        result, commands, report_path = self.run_scenario()
+        # Assert
+        self.assertTrue(any(c[:3] == ["docker", "rm", "-f"] for c in commands))
+        self.assertTrue(report_path.is_file())
         self.assertEqual(result["triton_validation"], "passed")
         self.assertTrue(any("/validation.py" in c for c in commands))
         self.assertTrue(any("tritonserver" in " ".join(c) for c in commands))
 
     def test_client_failure_is_not_a_pass(self):
-        result, _ = self.run_scenario(fail_client=True)
+        result, commands, report_path = self.run_scenario(fail_client=True)
+        # Assert
+        self.assertTrue(any(c[:3] == ["docker", "rm", "-f"] for c in commands))
+        self.assertTrue(report_path.is_file())
         self.assertEqual(result["triton_validation"], "failed")
         self.assertEqual(result["triton_stage"], "inference_comparison")
 
     def test_abi_mismatch_blocks_install_and_inference(self):
-        result, commands = self.run_scenario(version="3.14")
+        result, commands, report_path = self.run_scenario(version="3.14")
+        # Assert
+        self.assertTrue(any(c[:3] == ["docker", "rm", "-f"] for c in commands))
+        self.assertTrue(report_path.is_file())
         self.assertEqual(result["triton_validation"], "failed")
         self.assertEqual(result["triton_stage"], "python_compatibility")
         self.assertFalse(any("/validation.py" in c for c in commands))
 
     def test_gpu_enables_docker_cuda_and_checks_availability(self):
-        result, commands = self.run_scenario(device="gpu")
+        result, commands, report_path = self.run_scenario(device="gpu")
+        # Assert
+        self.assertTrue(any(c[:3] == ["docker", "rm", "-f"] for c in commands))
+        self.assertTrue(report_path.is_file())
         self.assertEqual(result["triton_validation"], "passed")
         self.assertEqual(result["device"], "gpu")
         command = next(c for c in commands if c[:2] == ["docker", "run"])
@@ -140,13 +151,19 @@ class ServingValidationTests(unittest.TestCase):
         self.assertNotIn("https://download.pytorch.org/whl/cpu", install)
 
     def test_gpu_failure_does_not_fall_back_to_cpu(self):
-        result, commands = self.run_scenario(device="gpu", fail_gpu=True)
+        result, commands, report_path = self.run_scenario(device="gpu", fail_gpu=True)
+        # Assert
+        self.assertTrue(any(c[:3] == ["docker", "rm", "-f"] for c in commands))
+        self.assertTrue(report_path.is_file())
         self.assertEqual(result["triton_validation"], "failed")
         self.assertEqual(result["triton_stage"], "gpu_availability")
         self.assertFalse(any("/validation.py" in c for c in commands))
 
     def test_cpu_keeps_gpu_hidden(self):
-        result, commands = self.run_scenario()
+        result, commands, report_path = self.run_scenario()
+        # Assert
+        self.assertTrue(any(c[:3] == ["docker", "rm", "-f"] for c in commands))
+        self.assertTrue(report_path.is_file())
         command = next(c for c in commands if c[:2] == ["docker", "run"])
         self.assertEqual(result["device"], "cpu")
         self.assertNotIn("--gpus", command)
@@ -166,7 +183,10 @@ class ServingValidationTests(unittest.TestCase):
         )
 
     def test_gpu_reference_runs_before_triton_start_and_cpu_drift_stays_separate(self):
-        result, commands = self.run_scenario(device="gpu")
+        result, commands, report_path = self.run_scenario(device="gpu")
+        # Assert
+        self.assertTrue(any(c[:3] == ["docker", "rm", "-f"] for c in commands))
+        self.assertTrue(report_path.is_file())
         reference = next(
             i for i, c in enumerate(commands) if "--native-gpu-reference" in c
         )
@@ -181,7 +201,12 @@ class ServingValidationTests(unittest.TestCase):
         self.assertEqual(result["comparison"], "saved_native_artifact_gpu")
 
     def test_failed_native_gpu_reference_blocks_server_start(self):
-        result, commands = self.run_scenario(device="gpu", fail_reference=True)
+        result, commands, report_path = self.run_scenario(
+            device="gpu", fail_reference=True
+        )
+        # Assert
+        self.assertTrue(any(c[:3] == ["docker", "rm", "-f"] for c in commands))
+        self.assertTrue(report_path.is_file())
         self.assertEqual(result["triton_validation"], "failed")
         self.assertEqual(result["triton_stage"], "native_gpu_reference")
         self.assertFalse(

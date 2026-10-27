@@ -158,7 +158,8 @@ class LoggingWrapperTests(unittest.TestCase):
         path = self.prepare(signature=signature)
         self.assertEqual(Model.load(path / "MLmodel").signature, signature)
 
-    def test_invalid_signature_does_not_log_or_leave_destination(self):
+    def test_invalid_signature_does_not_log(self):
+        # Arrange
         signature = mlflow.models.ModelSignature(
             inputs=Schema([ColSpec(DataType.double, "absent")])
         )
@@ -171,6 +172,25 @@ class LoggingWrapperTests(unittest.TestCase):
                     pip_requirements=["scikit-learn"],
                 )
             log.assert_not_called()
+
+    def test_invalid_signature_leaves_no_destination(self):
+        # Arrange
+        destination = self.root / "invalid-model"
+        signature = mlflow.models.ModelSignature(
+            inputs=Schema([ColSpec(DataType.double, "absent")])
+        )
+
+        # Act / Assert
+        with self.assertRaises((ValueError, mlflow.exceptions.MlflowException)):
+            _logging.prepare_model(
+                "sklearn",
+                fixture_model(),
+                destination,
+                input_example=self.example,
+                signature=signature,
+                pip_requirements=["scikit-learn"],
+            )
+        self.assertFalse(destination.exists())
 
     def test_real_log_register_and_load_keeps_both_flavors(self):
         tracking, registry = mlflow.get_tracking_uri(), mlflow.get_registry_uri()
@@ -265,8 +285,20 @@ class LoggingWrapperTests(unittest.TestCase):
         for key, tensor in restored.state_dict().items():
             torch.testing.assert_close(tensor, original[key], rtol=0, atol=0)
         self.assertTrue((path / "model_repository/model/1/model.py").exists())
+
+    @unittest.skipUnless(
+        importlib.util.find_spec("torch"), "Optional torch dependency is not installed"
+    )
+    def test_pytorch_rejects_state_dict(self):
+        # Arrange
+        import torch
+
+        weights = torch.nn.Linear(2, 1).state_dict()
+        values = self.example.to_numpy()
+
+        # Act / Assert
         with self.assertRaisesRegex(ValueError, "state_dict"):
-            pytorch.log_model(original, input_example=values)
+            pytorch.log_model(weights, input_example=values)
 
     def test_transformers_wrapper_forwards_pipeline_assets_and_options(self):
         sentinel = object()
@@ -409,23 +441,56 @@ class LoggingWrapperTests(unittest.TestCase):
         self.assertIsNotNone(signature.inputs)
         self.assertIsNotNone(signature.outputs)
 
-    def test_named_tensor_mapping_and_device_configuration(self):
+    def named_tensor_fixture(self):
         inputs = {
             "tokens": np.ones((2, 3), dtype=np.int64),
             "mask": np.ones((2, 3), dtype=np.int64),
         }
         outputs = {"scores": np.ones((2, 5), dtype=np.float32)}
         contract = contract_from_signature(infer_signature(inputs, outputs), "pytorch")
+        return inputs, outputs, contract
+
+    def test_named_tensor_mapping_preserves_inputs(self):
+        # Arrange
+        inputs, _, contract = self.named_tensor_fixture()
         tensors = _runtime.example_tensors(inputs, contract)
+
+        # Act
         restored = _runtime.decode_inputs(tensors, contract)
+
+        # Assert
         for key, value in inputs.items():
             np.testing.assert_array_equal(restored[key], value)
-        self.assertIn("KIND_GPU", config_text("model", contract, "gpu"))
+
+    def test_gpu_configuration_uses_gpu_instance(self):
+        # Arrange
+        _, _, contract = self.named_tensor_fixture()
+
+        # Act
+        config = config_text("model", contract, "gpu")
+
+        # Assert
+        self.assertIn("KIND_GPU", config)
+
+    def test_named_tensor_contract_preserves_signature_dimensions(self):
+        # Arrange
+        inputs, outputs, _ = self.named_tensor_fixture()
+        signature = infer_signature(inputs, outputs)
+
+        # Act
+        contract = contract_from_signature(signature, "pytorch")
+
+        # Assert
         self.assertEqual(contract["inputs"][0]["dims"], [-1, 3])
+
+    def test_output_encoding_rejects_wrong_dtype(self):
+        # Arrange
+        _, outputs, contract = self.named_tensor_fixture()
+        invalid = {"scores": outputs["scores"].astype(np.float64)}
+
+        # Act / Assert
         with self.assertRaisesRegex(ValueError, "dtype"):
-            _runtime.encode_outputs(
-                {"scores": outputs["scores"].astype(np.float64)}, contract
-            )
+            _runtime.encode_outputs(invalid, contract)
 
 
 if __name__ == "__main__":
