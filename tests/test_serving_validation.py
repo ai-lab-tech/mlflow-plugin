@@ -18,9 +18,18 @@ SPEC.loader.exec_module(serving)
 
 class ServingValidationTests(unittest.TestCase):
     def test_numeric_string_and_nonfinite_binary_comparison(self):
-        expected = {"score": np.array([1.0, np.nan, np.inf], dtype=np.float32), "label": np.array(["Berlin"])}
-        actual = {"score": expected["score"].copy(), "label": np.array([b"Berlin"], dtype=object)}
-        specs = [{"name": "score", "datatype": "FP32"}, {"name": "label", "datatype": "BYTES"}]
+        expected = {
+            "score": np.array([1.0, np.nan, np.inf], dtype=np.float32),
+            "label": np.array(["Berlin"]),
+        }
+        actual = {
+            "score": expected["score"].copy(),
+            "label": np.array([b"Berlin"], dtype=object),
+        }
+        specs = [
+            {"name": "score", "datatype": "FP32"},
+            {"name": "label", "datatype": "BYTES"},
+        ]
         serving.compare_outputs(actual, expected, specs)
         for replacement in [
             np.array([2.0, np.nan, np.inf], dtype=np.float32),
@@ -28,11 +37,15 @@ class ServingValidationTests(unittest.TestCase):
             np.array([1], dtype=np.float32),
         ]:
             with self.assertRaises(AssertionError):
-                serving.compare_outputs({**actual, "score": replacement}, expected, specs)
+                serving.compare_outputs(
+                    {**actual, "score": replacement}, expected, specs
+                )
         with self.assertRaises(AssertionError):
             serving.compare_outputs({"score": actual["score"]}, expected, specs)
 
-    def run_scenario(self, fail_client=False, version="3.11", device="cpu", fail_gpu=False):
+    def run_scenario(
+        self, fail_client=False, version="3.11", device="cpu", fail_gpu=False
+    ):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             row = {
@@ -40,12 +53,16 @@ class ServingValidationTests(unittest.TestCase):
                 "serving_path": str(root / "model"),
                 "fixture_path": str(root / "fixture.npz"),
             }
-            options = SimpleNamespace(timeout=10, startup_timeout=5, inference_timeout=5, device=device)
+            options = SimpleNamespace(
+                timeout=10, startup_timeout=5, inference_timeout=5, device=device
+            )
             commands = []
 
             def run(command, **kwargs):
                 commands.append(command)
-                if fail_gpu and any("torch.cuda.is_available()" in part for part in command):
+                if fail_gpu and any(
+                    "torch.cuda.is_available()" in part for part in command
+                ):
                     raise subprocess.CalledProcessError(1, command)
                 if fail_client and "/validation.py" in command:
                     raise subprocess.CalledProcessError(1, command)
@@ -53,10 +70,19 @@ class ServingValidationTests(unittest.TestCase):
 
             with (
                 patch.object(serving.subprocess, "run", side_effect=run),
-                patch.object(serving.subprocess, "check_output", side_effect=[version, "libpython3.11.so"]),
+                patch.object(
+                    serving.subprocess,
+                    "check_output",
+                    side_effect=[version, "libpython3.11.so"],
+                ),
             ):
                 result = serving.validate_serving(
-                    row, "runtime:test", "3.11", root / "requirements.txt", root / "result", options
+                    row,
+                    "runtime:test",
+                    "3.11",
+                    root / "requirements.txt",
+                    root / "result",
+                    options,
                 )
             self.assertTrue(any(c[:3] == ["docker", "rm", "-f"] for c in commands))
             self.assertTrue((root / "result/result.json").is_file())
@@ -87,7 +113,9 @@ class ServingValidationTests(unittest.TestCase):
         self.assertIn("--gpus", command)
         self.assertNotIn("CUDA_VISIBLE_DEVICES=-1", command)
         self.assertNotIn("NVIDIA_VISIBLE_DEVICES=void", command)
-        self.assertTrue(any("torch.cuda.is_available()" in " ".join(c) for c in commands))
+        self.assertTrue(
+            any("torch.cuda.is_available()" in " ".join(c) for c in commands)
+        )
         client = next(c for c in commands if "/validation.py" in c)
         self.assertEqual(client[client.index("--device") + 1], "gpu")
         install = next(c for c in commands if "pip" in c)

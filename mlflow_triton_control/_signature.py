@@ -39,7 +39,9 @@ def _schema(schema, direction):
     if not tensor_based and not all(isinstance(s, ColSpec) for s in entries):
         raise ValueError("Mixed column/tensor signatures are unsupported")
     if tensor_based and len(entries) > 1 and any(s.name is None for s in entries):
-        raise ValueError("Multiple tensors require explicit names in the MLflow signature")
+        raise ValueError(
+            "Multiple tensors require explicit names in the MLflow signature"
+        )
     specs, used = [], set()
     for index, item in enumerate(entries):
         source = item.name if item.name is not None else index
@@ -57,12 +59,16 @@ def _schema(schema, direction):
             if not item.required:
                 raise ValueError("Optional columns require an explicit serving adapter")
             if item.type not in _COLUMNS:
-                raise ValueError("Nested/object/datetime columns require an explicit serving adapter")
+                raise ValueError(
+                    "Nested/object/datetime columns require an explicit serving adapter"
+                )
             dtype = np.dtype(_COLUMNS[item.type])
             dims = [-1]
             logical = "binary" if item.type == DataType.binary else "string"
         if not dims or any(type(d) is not int or d == 0 or d < -1 for d in dims):
-            raise ValueError("Triton requires non-scalar tensor shapes with positive dimensions or -1")
+            raise ValueError(
+                "Triton requires non-scalar tensor shapes with positive dimensions or -1"
+            )
         datatype = "BYTES" if dtype.kind in "OUS" else _NUMPY.get(dtype.name)
         if datatype is None:
             raise ValueError("Unsupported Triton dtype: " + str(dtype))

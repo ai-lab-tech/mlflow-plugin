@@ -66,21 +66,33 @@ class LoggingWrapperTests(unittest.TestCase):
         )
         return destination
 
-    @unittest.skipUnless(importlib.util.find_spec("tritonclient"), "tritonclient is optional")
+    @unittest.skipUnless(
+        importlib.util.find_spec("tritonclient"), "tritonclient is optional"
+    )
     def test_config_parses_multiple_inputs_and_outputs_with_triton_schema(self):
         from google.protobuf import text_format
         from tritonclient.grpc import model_config_pb2
 
         signatures = [
             infer_signature(
-                pd.DataFrame({"text": ["example"], "count": np.array([1], dtype=np.int64)}),
+                pd.DataFrame(
+                    {"text": ["example"], "count": np.array([1], dtype=np.int64)}
+                ),
                 pd.DataFrame({"label": ["ok"], "score": [0.5]}),
             ),
             infer_signature(
-                {"tokens": np.ones((2, 3), dtype=np.int64), "mask": np.ones((2, 3), dtype=np.int64)},
-                {"scores": np.ones((2, 5), dtype=np.float32), "ids": np.ones((2,), dtype=np.int64)},
+                {
+                    "tokens": np.ones((2, 3), dtype=np.int64),
+                    "mask": np.ones((2, 3), dtype=np.int64),
+                },
+                {
+                    "scores": np.ones((2, 5), dtype=np.float32),
+                    "ids": np.ones((2,), dtype=np.int64),
+                },
             ),
-            infer_signature(np.ones((2, 3), dtype=np.float32), np.ones((2, 1), dtype=np.float32)),
+            infer_signature(
+                np.ones((2, 3), dtype=np.float32), np.ones((2, 1), dtype=np.float32)
+            ),
         ]
         for signature in signatures:
             for device in ["cpu", "gpu"]:
@@ -92,11 +104,20 @@ class LoggingWrapperTests(unittest.TestCase):
                         (config.input, contract["inputs"]),
                         (config.output, contract["outputs"]),
                     ]:
-                        self.assertEqual([item.name for item in field], [s["name"] for s in specs])
+                        self.assertEqual(
+                            [item.name for item in field], [s["name"] for s in specs]
+                        )
                         for item, spec in zip(field, specs):
                             self.assertEqual(list(item.dims), spec["dims"])
-                            dtype = "STRING" if spec["datatype"] == "BYTES" else spec["datatype"]
-                            self.assertEqual(item.data_type, model_config_pb2.DataType.Value("TYPE_" + dtype))
+                            dtype = (
+                                "STRING"
+                                if spec["datatype"] == "BYTES"
+                                else spec["datatype"]
+                            )
+                            self.assertEqual(
+                                item.data_type,
+                                model_config_pb2.DataType.Value("TYPE_" + dtype),
+                            )
                     self.assertEqual(config.backend, "python")
                     self.assertEqual(config.max_batch_size, 0)
 
@@ -115,7 +136,9 @@ class LoggingWrapperTests(unittest.TestCase):
     def test_saved_pipeline_native_and_triton_copy_have_same_predictions(self):
         path = self.prepare()
         metadata = Model.load(path / "MLmodel")
-        self.assertEqual(set(metadata.flavors), {"sklearn", "python_function", "triton"})
+        self.assertEqual(
+            set(metadata.flavors), {"sklearn", "python_function", "triton"}
+        )
         repository = path / metadata.flavors["triton"]["data"]
         native = mlflow.pyfunc.load_model(str(path))
         packaged = mlflow.pyfunc.load_model(str(repository / "1/artifact"))
@@ -137,7 +160,9 @@ class LoggingWrapperTests(unittest.TestCase):
         self.assertEqual(Model.load(path / "MLmodel").signature, signature)
 
     def test_invalid_signature_does_not_log_or_leave_destination(self):
-        signature = mlflow.models.ModelSignature(inputs=Schema([ColSpec(DataType.double, "absent")]))
+        signature = mlflow.models.ModelSignature(
+            inputs=Schema([ColSpec(DataType.double, "absent")])
+        )
         with patch.object(Model, "log") as log:
             with self.assertRaises((ValueError, mlflow.exceptions.MlflowException)):
                 sklearn.log_model(
@@ -167,7 +192,9 @@ class LoggingWrapperTests(unittest.TestCase):
                 )
             metadata = mlflow.models.get_model_info(info.model_uri)
             self.assertIsNotNone(metadata.signature)
-            self.assertEqual(set(metadata.flavors), {"sklearn", "python_function", "triton"})
+            self.assertEqual(
+                set(metadata.flavors), {"sklearn", "python_function", "triton"}
+            )
             repository = triton.load_model("models:/wrapped/1")
             self.assertTrue((repository / "1/model.py").is_file())
             np.testing.assert_array_equal(
@@ -181,7 +208,9 @@ class LoggingWrapperTests(unittest.TestCase):
     def test_generated_python_backend_executes_and_rejects_bad_requests(self):
         path = self.prepare()
         version = path / "model_repository/model/1"
-        spec = importlib.util.spec_from_file_location("generated_backend", version / "model.py")
+        spec = importlib.util.spec_from_file_location(
+            "generated_backend", version / "model.py"
+        )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
@@ -200,19 +229,25 @@ class LoggingWrapperTests(unittest.TestCase):
         )
         with patch.dict(sys.modules, {"triton_python_backend_utils": utils}):
             backend = module.TritonPythonModel()
-            backend.initialize({"model_instance_kind": "CPU", "model_instance_device_id": "0"})
+            backend.initialize(
+                {"model_instance_kind": "CPU", "model_instance_device_id": "0"}
+            )
             inputs = {
                 "left": Tensor("left", self.example.left.to_numpy()),
                 "right": Tensor("right", self.example.right.to_numpy()),
             }
-            replies = backend.execute([inputs, {}, {**inputs, "left": Tensor("left", np.ones(2, np.int32))}])
+            replies = backend.execute(
+                [inputs, {}, {**inputs, "left": Tensor("left", np.ones(2, np.int32))}]
+            )
         np.testing.assert_array_equal(
             replies[0]["output_tensors"][0].value, fixture_model().predict(self.example)
         )
         self.assertIn("Missing input", replies[1]["error"])
         self.assertIn("dtype", replies[2]["error"])
 
-    @unittest.skipUnless(importlib.util.find_spec("torch"), "Optional torch dependency is not installed")
+    @unittest.skipUnless(
+        importlib.util.find_spec("torch"), "Optional torch dependency is not installed"
+    )
     def test_pytorch_keeps_python_model_without_graph_export(self):
         import torch
 
@@ -236,7 +271,9 @@ class LoggingWrapperTests(unittest.TestCase):
 
     def test_transformers_wrapper_forwards_pipeline_assets_and_options(self):
         sentinel = object()
-        with patch("mlflow_triton_control.transformers.log_native_model", return_value=sentinel) as log:
+        with patch(
+            "mlflow_triton_control.transformers.log_native_model", return_value=sentinel
+        ) as log:
             pipeline = object()
             result = transformers.log_model(
                 pipeline,
@@ -250,7 +287,9 @@ class LoggingWrapperTests(unittest.TestCase):
         self.assertEqual(log.call_args.kwargs["model_config"], {"max_new_tokens": 8})
         self.assertEqual(log.call_args.kwargs["code_paths"], ["architecture.py"])
 
-    @unittest.skipUnless(importlib.util.find_spec("torch"), "Optional torch dependency is not installed")
+    @unittest.skipUnless(
+        importlib.util.find_spec("torch"), "Optional torch dependency is not installed"
+    )
     def test_custom_pytorch_architecture_loads_in_fresh_process(self):
         source = self.root / "custom_network.py"
         source.write_text(
@@ -315,7 +354,9 @@ class LoggingWrapperTests(unittest.TestCase):
         )
 
         tokenizer_core = Tokenizer(
-            WordLevel({"[UNK]": 0, "[EOS]": 1, "hello": 2, "world": 3}, unk_token="[UNK]")
+            WordLevel(
+                {"[UNK]": 0, "[EOS]": 1, "hello": 2, "world": 3}, unk_token="[UNK]"
+            )
         )
         tokenizer_core.pre_tokenizer = Whitespace()
         tokenizer = PreTrainedTokenizerFast(
@@ -324,7 +365,9 @@ class LoggingWrapperTests(unittest.TestCase):
             eos_token="[EOS]",
             pad_token="[EOS]",
         )
-        tokenizer.chat_template = "{% for message in messages %}{{ message['content'] }}{% endfor %}"
+        tokenizer.chat_template = (
+            "{% for message in messages %}{{ message['content'] }}{% endfor %}"
+        )
         model = GPT2LMHeadModel(
             GPT2Config(
                 vocab_size=4,
@@ -336,9 +379,13 @@ class LoggingWrapperTests(unittest.TestCase):
                 pad_token_id=1,
             )
         ).eval()
-        predictor = pipeline("text-generation", model=model, tokenizer=tokenizer, device=-1)
+        predictor = pipeline(
+            "text-generation", model=model, tokenizer=tokenizer, device=-1
+        )
         path = self.root / "hf"
-        with patch.dict(os.environ, {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}):
+        with patch.dict(
+            os.environ, {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
+        ):
             _logging.prepare_model(
                 "transformers",
                 predictor,
@@ -355,7 +402,9 @@ class LoggingWrapperTests(unittest.TestCase):
             reloaded = mlflow.transformers.load_model(str(path))
             self.assertEqual(reloaded.tokenizer.chat_template, tokenizer.chat_template)
             pyfunc = mlflow.pyfunc.load_model(str(path))
-            embedded = mlflow.pyfunc.load_model(str(path / "model_repository/model/1/artifact"))
+            embedded = mlflow.pyfunc.load_model(
+                str(path / "model_repository/model/1/artifact")
+            )
             self.assertEqual(pyfunc.predict(["hello"]), embedded.predict(["hello"]))
         signature = Model.load(path / "MLmodel").signature
         self.assertIsNotNone(signature.inputs)
@@ -375,7 +424,9 @@ class LoggingWrapperTests(unittest.TestCase):
         self.assertIn("KIND_GPU", config_text("model", contract, "gpu"))
         self.assertEqual(contract["inputs"][0]["dims"], [-1, 3])
         with self.assertRaisesRegex(ValueError, "dtype"):
-            _runtime.encode_outputs({"scores": outputs["scores"].astype(np.float64)}, contract)
+            _runtime.encode_outputs(
+                {"scores": outputs["scores"].astype(np.float64)}, contract
+            )
 
 
 if __name__ == "__main__":
