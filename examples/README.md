@@ -39,12 +39,32 @@ Docker must be running. From any working directory:
 python3 /home/ghost/git/mlflow-plugin/examples/run_real_models.py
 ```
 
-Use the script in this repository, not the old `/tmp/triton-control-log-model-wrapper`
-copy. By default, each run creates a new timestamped directory under
-`/mnt/container-data/mlflow-tests/`, on the large data disk. Logs, MLflow artifacts,
-serving copies, fixtures and pip cache are stored there. The runner refuses this
-default if the disk is not mounted. `--output` can override the location; an explicit
-output directory must be new. Previous results and running tests are not moved.
+Configure a storage directory suitable for your machine. For example, on a
+machine with a second SSD mounted at `/mnt/container-data`:
+
+```bash
+python examples/run_real_models.py --device gpu --output-root /mnt/container-data/mlflow-tests
+```
+
+`--output-root` creates a timestamped subdirectory per run. Alternatively, set
+`MLFLOW_TRITON_TEST_ROOT` once in your shell and run without a storage argument:
+
+```bash
+export MLFLOW_TRITON_TEST_ROOT=/mnt/container-data/mlflow-tests
+python examples/run_real_models.py --device cpu
+```
+
+`--output /any/new/directory` selects an exact output directory. CLI options take
+precedence over the environment variable. Any writable location is allowed;
+there is no hardcoded SSD path or mount requirement. Without an output option
+or the environment variable the runner asks you to configure storage instead
+of silently writing to the system disk. Logs, MLflow packages, caches, packaging
+scratch and host temporary files go under the chosen run directory.
+
+Docker images, build cache and serving-container scratch remain in Docker's
+configured data directory, which the runner reports but does not change.
+On the current workstation this is `/mnt/container-data/docker`. Other machines
+may configure Docker storage differently. Previous test results are not moved.
 
 The launcher first prepares CPU Triton images with Python 3.11 and 3.14 and
 matching Python backend stubs. It reuses its existing image tags on later runs.

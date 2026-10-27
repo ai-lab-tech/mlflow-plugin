@@ -8,13 +8,17 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
 
-from build_triton_runtime import build_image, dockerfile
-from real_models import CASES, DEFAULT_DATA_ROOT
-from serving_validation import validate_serving
+# Keep imports from creating __pycache__ in the source checkout.
+sys.dont_write_bytecode = True
+
+from build_triton_runtime import build_image, dockerfile  # noqa: E402 - disable bytecode writes before importing local modules
+from real_models import CASES, DEFAULT_DATA_ROOT  # noqa: E402 - disable bytecode writes before importing local modules
+from serving_validation import validate_serving  # noqa: E402 - disable bytecode writes before importing local modules
 
 GROUPS = {
     "sklearn": (
@@ -48,16 +52,26 @@ def runtime_requirements(data, family, device="cpu"):
     """Use saved inference versions; exclude unrelated training-only packages."""
     source = data / GROUPS[family][1]
     lines = source.read_text().splitlines()
-    pins = {line.split("==", 1)[0]: line for line in lines if "==" in line and not line.startswith("--")}
+    pins = {
+        line.split("==", 1)[0]: line
+        for line in lines
+        if "==" in line and not line.startswith("--")
+    }
     if device == "gpu":
         pins = {name: pin.replace("+cpu", "") for name, pin in pins.items()}
     missing = DEPENDENCIES[family] - pins.keys()
     if missing:
-        raise ValueError(f"Missing saved dependency pins in {source}: {sorted(missing)}")
+        raise ValueError(
+            f"Missing saved dependency pins in {source}: {sorted(missing)}"
+        )
     return (
         "\n".join(
             [
-                *(["--extra-index-url https://download.pytorch.org/whl/cpu"] if device == "cpu" else []),
+                *(
+                    ["--extra-index-url https://download.pytorch.org/whl/cpu"]
+                    if device == "cpu"
+                    else []
+                ),
                 "mlflow==3.17.2",
                 "httpx>=0.27,<1",
                 "cloudpickle==3.1.2",
@@ -73,6 +87,28 @@ def runtime_requirements(data, family, device="cpu"):
     )
 
 
+def test_output_path(output=None, output_root=None):
+    """Choose explicitly configured storage without assuming a host layout."""
+    if output is not None:
+        return Path(output).expanduser().resolve()
+    base = output_root or os.environ.get("MLFLOW_TRITON_TEST_ROOT")
+    if not base:
+        raise ValueError(
+            "Choose test storage with --output-root, --output or MLFLOW_TRITON_TEST_ROOT"
+        )
+    run_name = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
+    return Path(base).expanduser().resolve() / run_name
+
+
+def check_docker_storage():
+    root = subprocess.check_output(
+        ["docker", "info", "--format", "{{.DockerRootDir}}"], text=True, timeout=30
+    ).strip()
+    if not root:
+        raise ValueError("Docker did not report its storage directory")
+    return Path(root)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -81,10 +117,16 @@ def main():
         default=DEFAULT_DATA_ROOT,
         help="Saved artifacts; default: examples/data in this checkout",
     )
-    parser.add_argument(
+    destinations = parser.add_mutually_exclusive_group()
+    destinations.add_argument(
         "--output",
         type=Path,
-        help="New directory; default: /mnt/container-data/mlflow-tests/<timestamp>-<id>",
+        help="Exact new output directory (never overwritten)",
+    )
+    destinations.add_argument(
+        "--output-root",
+        type=Path,
+        help="Base directory for timestamped runs; alternatively set MLFLOW_TRITON_TEST_ROOT",
     )
     parser.add_argument(
         "--case",
@@ -92,14 +134,20 @@ def main():
         choices=CASES,
         help="Run selected cases only; repeatable",
     )
-    parser.add_argument("--family", action="append", choices=GROUPS, help="Default: all three")
-    parser.add_argument("--timeout", type=int, default=3600, help="Seconds per family including install")
+    parser.add_argument(
+        "--family", action="append", choices=GROUPS, help="Default: all three"
+    )
+    parser.add_argument(
+        "--timeout", type=int, default=3600, help="Seconds per family including install"
+    )
     parser.add_argument(
         "--triton-images",
         type=Path,
         help="Existing JSON image mapping; otherwise build matching Triton images for --device",
     )
-    parser.add_argument("--triton-base-image", default="nvcr.io/nvidia/tritonserver:26.06-py3")
+    parser.add_argument(
+        "--triton-base-image", default="nvcr.io/nvidia/tritonserver:26.06-py3"
+    )
     parser.add_argument("--startup-timeout", type=int, default=180)
     parser.add_argument("--inference-timeout", type=int, default=180)
     parser.add_argument(
@@ -115,21 +163,22 @@ def main():
         parser.error("Docker is required; install/start Docker and retry")
     subprocess.run(["docker", "info"], check=True, stdout=subprocess.DEVNULL)
     data = args.data_root.resolve(strict=True)
-    if args.output is None:
-        storage = Path("/mnt/container-data")
-        if not storage.is_mount():
-            parser.error("/mnt/container-data is not mounted; refusing to write tests onto the system disk")
-        run_name = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
-        output = storage / "mlflow-tests" / run_name
-    else:
-        output = args.output.resolve()
+    try:
+        output = test_output_path(args.output, args.output_root)
+        docker_storage = check_docker_storage()
+    except (ValueError, OSError) as error:
+        parser.error(str(error))
     plugin = Path(__file__).resolve().parents[1]
     requested = list(dict.fromkeys(args.case or CASES))
     if args.family:
         requested = [name for name in requested if CASES[name][0] in args.family]
     if args.device == "gpu":
-        if (args.case or args.family) and any(CASES[name][0] == "sklearn" for name in requested):
-            parser.error("sklearn supports CPU only; select PyTorch/Hugging Face for --device gpu")
+        if (args.case or args.family) and any(
+            CASES[name][0] == "sklearn" for name in requested
+        ):
+            parser.error(
+                "sklearn supports CPU only; select PyTorch/Hugging Face for --device gpu"
+            )
         requested = [name for name in requested if CASES[name][0] != "sklearn"]
     if not requested:
         parser.error("No cases match --case and --family")
@@ -137,26 +186,44 @@ def main():
     images = json.loads(args.triton_images.read_text()) if args.triton_images else {}
     for family in families:
         version = "3.14" if family == "pytorch" else "3.11"
-        if args.triton_images and (not isinstance(images.get(version), str) or not images[version]):
+        if args.triton_images and (
+            not isinstance(images.get(version), str) or not images[version]
+        ):
             parser.error(
                 f"--triton-images needs a Triton image with Python {version} and matching backend stub"
             )
     # Fail preflight before installing anything or creating partial results.
-    requirements = {family: runtime_requirements(data, family, args.device) for family in families}
+    requirements = {
+        family: runtime_requirements(data, family, args.device) for family in families
+    }
     for name, (family, relative) in CASES.items():
         if name in requested and not (data / relative).is_dir():
             parser.error(f"Missing artifact for {name}: {data / relative}")
     try:
         output.mkdir(parents=True, exist_ok=False)
     except PermissionError:
-        parser.error(f"No write permission for {output.parent}; create a user-owned test directory first")
-    print(f"Test output: {output}", flush=True)
+        parser.error(
+            f"No write permission for {output.parent}; create a user-owned test directory first"
+        )
+    print(f"Test output: {output}; Docker storage: {docker_storage}", flush=True)
+    host_tmp = output / "host-tmp"
+    host_tmp.mkdir()
+    os.environ["TMPDIR"] = str(host_tmp)
+    os.environ["TMP"] = str(host_tmp)
+    os.environ["TEMP"] = str(host_tmp)
     if not args.triton_images:
         for version in sorted({"3.14" if f == "pytorch" else "3.11" for f in families}):
             folder = output / ("triton-runtime-python-" + version)
             folder.mkdir()
-            (folder / "Dockerfile").write_text(dockerfile(args.triton_base_image, version, args.device))
-            tag = "mlflow-triton-runtime:" + args.triton_base_image.split(":")[-1] + "-python" + version
+            (folder / "Dockerfile").write_text(
+                dockerfile(args.triton_base_image, version, args.device)
+            )
+            tag = (
+                "mlflow-triton-runtime:"
+                + args.triton_base_image.split(":")[-1]
+                + "-python"
+                + version
+            )
             if args.device == "gpu":
                 tag += "-gpu"
             available = (
@@ -173,7 +240,9 @@ def main():
                     flush=True,
                 )
                 if build_image(tag, folder, folder / "build.log"):
-                    raise RuntimeError(f"Triton runtime build failed; see {folder / 'build.log'}")
+                    raise RuntimeError(
+                        f"Triton runtime build failed; see {folder / 'build.log'}"
+                    )
             images[version] = tag
         (output / "triton-images.json").write_text(json.dumps(images, indent=2) + "\n")
     cache = output / "pip-cache"
@@ -266,13 +335,21 @@ def main():
             if process.returncode:
                 failure = f"Container exited {process.returncode}; see {log}"
         except subprocess.TimeoutExpired:
-            subprocess.run(["docker", "rm", "-f", container], check=False, capture_output=True)
+            subprocess.run(
+                ["docker", "rm", "-f", container], check=False, capture_output=True
+            )
             failure = f"Family timed out after {args.timeout}s; see {log}"
         except KeyboardInterrupt:
-            subprocess.run(["docker", "rm", "-f", container], check=False, capture_output=True)
+            subprocess.run(
+                ["docker", "rm", "-f", container], check=False, capture_output=True
+            )
             raise
         report = output / family / "summary.json"
-        recorded = {row["case"]: row for row in json.loads(report.read_text())} if report.exists() else {}
+        recorded = (
+            {row["case"]: row for row in json.loads(report.read_text())}
+            if report.exists()
+            else {}
+        )
         for name in selected:
             results.append(
                 recorded.get(

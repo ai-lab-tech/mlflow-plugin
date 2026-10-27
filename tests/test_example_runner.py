@@ -22,6 +22,35 @@ finally:
 
 
 class ExampleRunnerTests(unittest.TestCase):
+    def setUp(self):
+        # Orchestration tests use temporary directories, not the real data disk.
+        check = patch.object(
+            runner, "check_docker_storage", return_value=Path("/data/docker")
+        )
+        check.start()
+        self.addCleanup(check.stop)
+        environment = patch.dict(runner.os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def test_configurable_output_paths_and_precedence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.dict(
+                runner.os.environ, {"MLFLOW_TRITON_TEST_ROOT": str(root / "env")}
+            ):
+                self.assertEqual(runner.test_output_path().parent, root / "env")
+                self.assertEqual(
+                    runner.test_output_path(output_root=root / "cli").parent,
+                    root / "cli",
+                )
+                self.assertEqual(
+                    runner.test_output_path(output=root / "exact"), root / "exact"
+                )
+            with patch.dict(runner.os.environ, {"MLFLOW_TRITON_TEST_ROOT": ""}):
+                with self.assertRaisesRegex(ValueError, "Choose test storage"):
+                    runner.test_output_path()
+
     def test_selected_case_and_packaging_tmp_are_on_output_disk(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
