@@ -287,7 +287,7 @@ def main():
             "-e",
             "PYTHONDONTWRITEBYTECODE=1",
             "-e",
-            f"PYTHONPATH={plugin}",
+            f"PYTHONPATH={plugin / 'packages/mlflow-triton/src'}",
             # Keep output paths identical so SQLite artifact URIs work on the host.
             "-v",
             f"{plugin}:{plugin}:ro",

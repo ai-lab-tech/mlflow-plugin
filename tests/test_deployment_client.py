@@ -5,7 +5,6 @@ import unittest
 from unittest.mock import Mock, patch
 
 from mlflow.exceptions import MlflowException
-
 from mlflow_triton_control.deployment_client import TritonControlDeploymentClient
 
 

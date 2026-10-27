@@ -7,8 +7,7 @@ from unittest.mock import patch
 
 from mlflow.exceptions import MlflowException
 from mlflow.models import Model
-
-from mlflow_triton_control import triton
+from mlflow_triton import triton
 
 
 class TritonFlavorTests(unittest.TestCase):

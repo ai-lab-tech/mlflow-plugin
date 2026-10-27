@@ -228,7 +228,7 @@ def main():
         }
         try:
             flavor, model, example, kwargs = load_example(name, args.data_root)
-            wrapper = importlib.import_module("mlflow_triton_control." + flavor)
+            wrapper = importlib.import_module("mlflow_triton." + flavor)
             with mlflow.start_run(experiment_id=experiment, run_name=name):
                 info = wrapper.log_model(
                     model,
@@ -241,7 +241,7 @@ def main():
 
             import numpy as np
 
-            from mlflow_triton_control import _runtime, triton
+            from mlflow_triton import _runtime, triton
 
             repository = triton.load_model(info.model_uri)
             serving = output / "serving" / name

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=77.0.3", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlflow-triton"
+version = "0.4.0"
+description = "MLflow logging wrappers and portable Triton model repositories"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = ["mlflow>=3.14,<4"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mlflow_triton*"]

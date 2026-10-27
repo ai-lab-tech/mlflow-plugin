@@ -1,13 +1,7 @@
-name: MLflow plugin CI
+name: MLflow packages CI
 
 on:
   workflow_dispatch:
-    inputs:
-      mlflow_version:
-        description: "Additional MLflow version to smoke test (e.g. 3.15.0)"
-        required: false
-        default: ""
-        type: string
   schedule:
     - cron: "0 6 * * 1"
   push:
@@ -17,50 +11,101 @@ permissions:
   contents: read
 
 jobs:
-  smoke:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install build ruff twine
+      - name: Check versions and formatting
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          python scripts/check_release.py
+          if [ -n "$RELEASE_TAG" ]; then
+            python scripts/check_release.py --tag "$RELEASE_TAG"
+          fi
+          ruff check packages tests scripts
+          ruff format --check packages tests scripts
+      - name: Build distributions
+        run: |
+          python -m build packages/mlflow-triton --outdir dist/core
+          python -m build packages/mlflow-triton-control --outdir dist/control
+          python -m twine check dist/core/* dist/control/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+  test:
+    needs: build
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        mlflow: ["chart"]
-        include:
-          - mlflow: ${{ inputs.mlflow_version || 'chart' }}
+        mlflow: ["3.14.0", "latest"]
     steps:
       - uses: actions/checkout@v4
-      - name: Check out Triton Control chart
-        if: matrix.mlflow == 'chart'
-        uses: actions/checkout@v4
-        with:
-          repository: ai-lab-tech/triton-control
-          ref: main
-          path: .triton-control
-          sparse-checkout: charts/triton-control
-          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Build and install wheel
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - name: Install core alone
         env:
           MLFLOW_VERSION: ${{ matrix.mlflow }}
         run: |
-          python -m pip install build ruff pyyaml
-          python -m build
-          if [ "$MLFLOW_VERSION" = chart ]; then
-            MLFLOW_VERSION=$(python -c 'import yaml; print(yaml.safe_load(open(".triton-control/charts/triton-control/values.yaml"))["mlflow"]["version"])')
-            echo "Testing MLflow version from triton-control/main: $MLFLOW_VERSION"
-          fi
           if [ "$MLFLOW_VERSION" = latest ]; then
-            python -m pip install --upgrade dist/*.whl "mlflow>=3.14,<4"
+            python -m pip install dist/core/*.whl "mlflow>=3.14,<4"
           else
-            python -m pip install dist/*.whl "mlflow==$MLFLOW_VERSION"
+            python -m pip install dist/core/*.whl "mlflow==$MLFLOW_VERSION"
           fi
           python -m pip check
-          python -c 'import mlflow; print("Testing MLflow", mlflow.__version__)'
-      - name: Smoke tests
+      - name: Test core without Control
+        env:
+          MLFLOW_DISABLE_AGENT_HINT: "1"
+        run: python scripts/test_packages.py --package core --require-core-only
+      - name: Install and test optional Control integration
         env:
           MLFLOW_DISABLE_AGENT_HINT: "1"
         run: |
-          ruff check mlflow_triton_control tests
-          ruff format --check mlflow_triton_control tests
+          python -m pip install dist/control/*.whl
+          python -m pip check
           mlflow deployments help -t triton-control
-          python -m unittest discover -s tests -v
+          python scripts/test_packages.py --package control
+
+  publish-core:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    environment: pypi-core
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/core/
+
+  publish-control:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [test, publish-core]
+    runs-on: ubuntu-latest
+    environment: pypi-control
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/control/

@@ -16,11 +16,7 @@ import numpy as np
 import pandas as pd
 from mlflow.models import Model, infer_signature
 from mlflow.types.schema import ColSpec, DataType, Schema
-from sklearn.linear_model import LinearRegression
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-
-from mlflow_triton_control import (
+from mlflow_triton import (
     _logging,
     _runtime,
     pytorch,
@@ -28,7 +24,10 @@ from mlflow_triton_control import (
     transformers,
     triton,
 )
-from mlflow_triton_control._signature import config_text, contract_from_signature
+from mlflow_triton._signature import config_text, contract_from_signature
+from sklearn.linear_model import LinearRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 
 def fixture_model():
@@ -272,7 +271,7 @@ class LoggingWrapperTests(unittest.TestCase):
     def test_transformers_wrapper_forwards_pipeline_assets_and_options(self):
         sentinel = object()
         with patch(
-            "mlflow_triton_control.transformers.log_native_model", return_value=sentinel
+            "mlflow_triton.transformers.log_native_model", return_value=sentinel
         ) as log:
             pipeline = object()
             result = transformers.log_model(

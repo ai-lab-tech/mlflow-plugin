@@ -286,3 +286,10 @@ original source removed and a fresh HF module cache, and verifies that deleting
 the packaged architecture file causes a failure. Actual CPU/GPU Triton execution
 for this new example remains to be run; the prior twelve passing cases do not
 count as validation of this additional case.
+
+## Package installation
+
+Examples use only the `mlflow-triton` core. For local execution install it with
+`pip install -e packages/mlflow-triton` from the repository root. The Docker
+runner mounts the core source directory; no Control integration is installed or
+needed. See the [core API documentation](../packages/mlflow-triton/README.md).

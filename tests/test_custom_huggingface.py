@@ -13,8 +13,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
-
-from mlflow_triton_control._logging import prepare_model
+from mlflow_triton._logging import prepare_model
 
 
 @unittest.skipUnless(
