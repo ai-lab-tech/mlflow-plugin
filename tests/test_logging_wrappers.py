@@ -478,7 +478,13 @@ class LoggingWrapperTests(unittest.TestCase):
             InferenceResponse=lambda **kwargs: kwargs,
             get_input_tensor_by_name=lambda request, name: request.get(name),
         )
-        with patch.dict(sys.modules, {"triton_python_backend_utils": utils}):
+        # Restoring all of sys.modules would unload dependencies imported during
+        # initialize(), corrupting SQLAlchemy's cached extension-module state.
+        stub_name = "triton_python_backend_utils"
+        missing = object()
+        previous = sys.modules.get(stub_name, missing)
+        sys.modules[stub_name] = utils
+        try:
             backend = module.TritonPythonModel()
             backend.initialize(
                 {
@@ -502,11 +508,37 @@ class LoggingWrapperTests(unittest.TestCase):
             replies = backend.execute(
                 [inputs, {}, {**inputs, "left": Tensor("left", np.ones(2, np.int32))}]
             )
+        finally:
+            if previous is missing:
+                sys.modules.pop(stub_name, None)
+            else:
+                sys.modules[stub_name] = previous
         np.testing.assert_array_equal(
             replies[0]["output_tensors"][0].value, fixture_model().predict(self.example)
         )
         self.assertIn("Missing input", replies[1]["error"])
         self.assertIn("dtype", replies[2]["error"])
+
+    def test_backend_stub_preserves_imports_for_subsequent_logging(self):
+        # A fresh process prevents earlier framework tests from preloading
+        # SQLAlchemy and masking module-registry corruption in the backend test.
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "unittest",
+                "test_logging_wrappers.LoggingWrapperTests."
+                "test_generated_python_backend_executes_and_rejects_bad_requests",
+                "test_logging_wrappers.LoggingWrapperTests."
+                "test_real_log_register_and_load_keeps_both_flavors",
+                "test_smoke.SmokeTests.test_log_register_and_load_real_mlflow_model",
+            ],
+            cwd=Path(__file__).resolve().parent,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     @unittest.skipUnless(
         importlib.util.find_spec("torch"), "Optional torch dependency is not installed"
