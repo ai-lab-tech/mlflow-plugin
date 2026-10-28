@@ -26,7 +26,7 @@ entry point and makes no Triton Control API calls.
 Use the plugin's framework module instead of `mlflow.<framework>.log_model`:
 
 ```python
-from mlflow_triton import sklearn, pytorch, transformers, triton
+from mlflow_triton import sklearn, pytorch, transformers
 
 # Already-fitted Pipeline, including its original preprocessing.
 info = sklearn.log_model(
@@ -54,8 +54,7 @@ hf_info = transformers.log_model(
     model_config={"max_new_tokens": 32, "do_sample": False, "return_full_text": True},
 )
 
-repository = triton.load_model(info.model_uri)
-print(repository / "config.pbtxt")
+print(info.model_uri)
 ```
 
 `input_example` is a mandatory keyword argument even when `signature=` is supplied.
@@ -213,7 +212,7 @@ Configure the MLflow tracking URI/experiment using MLflow's normal API before
 logging, if required for your environment.
 
 ```python
-from mlflow_triton import sklearn, pytorch, transformers, triton
+from mlflow_triton import sklearn, pytorch, transformers
 
 # sklearn: named DataFrame columns and preprocessing travel with the Pipeline.
 sk_info = sklearn.log_model(
@@ -247,6 +246,14 @@ hf_info = transformers.log_model(
 )
 
 print(hf_info.model_uri)
+```
+
+Logging has already generated and saved the Triton repository. If you need a local
+directory to inspect or hand off to deployment tooling, optionally retrieve it:
+
+```python
+from mlflow_triton import triton
+
 repository = triton.load_model(hf_info.model_uri)
 print(repository / "config.pbtxt")
 print(repository / "1/model.py")
@@ -258,6 +265,8 @@ All three calls return MLflow `ModelInfo`. Use `info.model_uri` to load the save
 model or resolve its Triton repository, and `info.registered_model_version` when
 registration was requested. `triton.load_model(info.model_uri)` returns a local
 `pathlib.Path` to the model-name directory, downloading artifacts as necessary.
+This optional call only retrieves the generated repository; it does not load model
+weights, regenerate the repository or load it into a running Triton server.
 
 Before logging/registration, the wrapper saves the native model, reloads it,
 executes the example prediction, derives/checks the signature and validates the
