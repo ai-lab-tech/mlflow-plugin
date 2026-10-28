@@ -169,6 +169,14 @@ def main():
     parser.add_argument("--startup-timeout", type=int, default=180)
     parser.add_argument("--inference-timeout", type=int, default=180)
     parser.add_argument(
+        "--requirements-only",
+        action="store_true",
+        help=(
+            "Use a fresh serving environment per case with only its generated "
+            "requirements.txt; keep HTTP client dependencies in a separate environment"
+        ),
+    )
+    parser.add_argument(
         "--device",
         choices=["cpu", "gpu"],
         default="cpu",

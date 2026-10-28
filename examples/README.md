@@ -229,6 +229,44 @@ No GPU inference result has been established by these code/unit-test changes;
 run the command above to measure it. Triton/native-GPU differences remain serving failures. CPU/GPU differences
 are recorded separately; the tolerances are never automatically relaxed.
 
+## Serve using only each model's generated requirements
+
+Use this launcher for the original eight GPU cases: four PyTorch cases plus
+Hugging Face classification, NER, question answering and generation:
+
+```bash
+bash examples/run_eight_gpu_requirements.sh \
+  --data-root /path/to/combined-test-data \
+  --output-root /path/to/test-output
+```
+
+The launcher passes `--requirements-only` to `run_real_models.py`. Each model gets
+a fresh Triton container and a fresh virtual environment. The serving environment
+installs only that generated model's `requirements.txt` and its transitive
+dependencies, then runs `pip check`. Family dependency lists and test client
+packages are not added to it. The runtime's inherited Python path, including
+bundled DALI packages, is replaced by the new model environment's path.
+
+HTTP/protobuf client dependencies are installed in a separate virtual environment.
+The client prepares the tensor contract for the native GPU reference, so that
+reference runs in the model environment without importing client dependencies.
+Actual Triton inference is compared against that independent native GPU prediction;
+CPU/GPU differences remain separate diagnostics with unchanged tolerances.
+Dependency installation or validation failures remain failures; the runner does
+not add missing model dependencies automatically.
+
+Packaging still uses the saved producer dependencies to load and log the model.
+The strict dependency check applies to the subsequent serving environment.
+The default runtime base remains Triton `26.06-py3`, with the matching Python
+backend stub for Python 3.14 (PyTorch) or 3.11 (Hugging Face). Existing compatible
+runtime images are reused, while model environments are recreated for every case.
+
+Each `triton/<case>/` directory retains `model-requirements.txt`, `install.log`,
+`dependency-check.log`, `requirements-lock.txt`, `model-install-report.json`,
+`client-install.log`, `client-install-report.json` and the normal serving reports.
+The eight-case launcher excludes `huggingface_custom`; use the main runner with
+`--requirements-only --device gpu` to select all available GPU cases, including it.
+
 ## Native GPU reference and CPU/GPU differences
 
 GPU runs now load the same saved MLflow artifact on `cuda:0` in a separate process,

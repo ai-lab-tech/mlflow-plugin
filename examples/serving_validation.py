@@ -103,7 +103,7 @@ def read_model_contract(model_directory):
     )
 
 
-def native_gpu_reference():
+def native_gpu_reference(contract_path=None):
     """Independent native MLflow prediction in its own process, before Triton starts."""
     import importlib.util
     import os
@@ -111,7 +111,11 @@ def native_gpu_reference():
     import mlflow.pyfunc
     import numpy as np
 
-    contract = read_model_contract("/model")
+    contract = (
+        json.loads(Path(contract_path).read_text())
+        if contract_path is not None
+        else read_model_contract("/model")
+    )
     # Reuse schema conversion only. Do not instantiate TritonPythonModel or execute().
     spec = importlib.util.spec_from_file_location("tensor_mapping", "/model/1/model.py")
     mapping = importlib.util.module_from_spec(spec)
@@ -149,7 +153,6 @@ def native_gpu_reference():
 
 def client_main():
     import numpy as np
-    import tritonclient.http as http
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
@@ -157,10 +160,19 @@ def client_main():
     parser.add_argument("--inference-timeout", type=int, default=180)
     parser.add_argument("--device", choices=["cpu", "gpu"], default="cpu")
     parser.add_argument("--native-gpu-reference", action="store_true")
+    parser.add_argument("--contract", type=Path)
+    parser.add_argument("--write-contract", type=Path)
     args = parser.parse_args()
-    if args.native_gpu_reference:
-        native_gpu_reference()
+    if args.write_contract is not None:
+        args.write_contract.write_text(
+            json.dumps(read_model_contract("/model"), indent=2) + "\n"
+        )
         return
+    if args.native_gpu_reference:
+        native_gpu_reference(args.contract)
+        return
+    import tritonclient.http as http
+
     contract = read_model_contract("/model")
     with np.load("/fixture.npz", allow_pickle=False) as fixture:
         inputs = {k[6:]: fixture[k] for k in fixture.files if k.startswith("input:")}
@@ -250,11 +262,19 @@ def validate_serving(row, image, python_version, requirements, directory, option
     helper = Path(__file__).resolve()
     name = "mlflow-serving-" + uuid.uuid4().hex[:12]
     device = getattr(options, "device", "cpu")
+    requirements_only = getattr(options, "requirements_only", False)
+    model_python = "/tmp/model-runtime/bin/python" if requirements_only else "python3"
+    model_site = f"/tmp/model-runtime/lib/python{python_version}/site-packages"
+    client_site = f"/tmp/client-runtime/lib/python{python_version}/site-packages"
     result = {
         "device": device,
         "triton_validation": "failed",
         "triton_stage": "container_start",
         "triton_image": image,
+        "dependency_policy": (
+            "generated_requirements_only" if requirements_only else "family_and_model"
+        ),
+        "client_environment": "separate_virtualenv" if requirements_only else "shared",
     }
 
     def run(command, filename, timeout=60):
@@ -266,6 +286,19 @@ def validate_serving(row, image, python_version, requirements, directory, option
                 stderr=subprocess.STDOUT,
                 timeout=timeout,
             )
+
+    def client_command(*arguments):
+        if requirements_only:
+            return [
+                "docker",
+                "exec",
+                "-e",
+                f"PYTHONPATH={client_site}",
+                name,
+                "/tmp/client-runtime/bin/python",
+                *arguments,
+            ]
+        return ["docker", "exec", name, "python3", *arguments]
 
     try:
         run(
@@ -301,7 +334,9 @@ def validate_serving(row, image, python_version, requirements, directory, option
                 "--shm-size",
                 "1g",
                 "-e",
-                "PYTHONPATH=/tmp/model-deps",
+                "PYTHONPATH=" + (model_site if requirements_only else "/tmp/model-deps"),
+                "-e",
+                "PYTHONNOUSERSITE=1",
                 "-e",
                 "PYTHONDONTWRITEBYTECODE=1",
                 "-e",
@@ -318,8 +353,11 @@ def validate_serving(row, image, python_version, requirements, directory, option
                 f"{model}:/model:ro",
                 "-v",
                 f"{fixture}:/fixture.npz:ro",
-                "-v",
-                f"{requirements}:/family-requirements.txt:ro",
+                *(
+                    []
+                    if requirements_only
+                    else ["-v", f"{requirements}:/family-requirements.txt:ro"]
+                ),
                 "-v",
                 f"{helper}:/validation.py:ro",
                 image,
@@ -360,32 +398,78 @@ def validate_serving(row, image, python_version, requirements, directory, option
                 f"Need Python {python_version} and matching Triton stub; found interpreter {version}"
             )
         result["triton_stage"] = "dependency_install"
-        run(
-            [
-                "docker",
-                "exec",
-                name,
-                "python3",
-                "-m",
-                "pip",
-                "install",
-                "--target",
-                "/tmp/model-deps",
-                "--upgrade",
-                *(
-                    ["--extra-index-url", "https://download.pytorch.org/whl/cpu"]
-                    if device == "cpu"
-                    else []
-                ),
-                "-r",
-                "/family-requirements.txt",
-                "-r",
-                "/model/requirements.txt",
-                "tritonclient[http,grpc]",
-            ],
-            "install.log",
-            options.timeout,
-        )
+        if requirements_only:
+            (directory / "model-requirements.txt").write_bytes(
+                (model / "requirements.txt").read_bytes()
+            )
+            run(
+                [
+                    "docker",
+                    "exec",
+                    name,
+                    "python3",
+                    "-m",
+                    "venv",
+                    "/tmp/model-runtime",
+                ],
+                "install.log",
+                options.timeout,
+            )
+            run(
+                [
+                    "docker",
+                    "exec",
+                    name,
+                    model_python,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--report",
+                    "/tmp/model-install-report.json",
+                    "-r",
+                    "/model/requirements.txt",
+                ],
+                "install.log",
+                options.timeout,
+            )
+            run(
+                ["docker", "exec", name, model_python, "-m", "pip", "check"],
+                "dependency-check.log",
+                options.timeout,
+            )
+            run(
+                ["docker", "exec", name, model_python, "-m", "pip", "freeze"],
+                "requirements-lock.txt",
+                options.timeout,
+            )
+            result["dependency_validation"] = "passed"
+        else:
+            run(
+                [
+                    "docker",
+                    "exec",
+                    name,
+                    "python3",
+                    "-m",
+                    "pip",
+                    "install",
+                    "--target",
+                    "/tmp/model-deps",
+                    "--upgrade",
+                    *(
+                        ["--extra-index-url", "https://download.pytorch.org/whl/cpu"]
+                        if device == "cpu"
+                        else []
+                    ),
+                    "-r",
+                    "/family-requirements.txt",
+                    "-r",
+                    "/model/requirements.txt",
+                    "tritonclient[http,grpc]",
+                ],
+                "install.log",
+                options.timeout,
+            )
         if device == "gpu":
             result["triton_stage"] = "gpu_availability"
             run(
@@ -393,7 +477,7 @@ def validate_serving(row, image, python_version, requirements, directory, option
                     "docker",
                     "exec",
                     name,
-                    "python3",
+                    model_python,
                     "-c",
                     "import torch; assert torch.version.cuda is not None, 'CPU-only PyTorch wheel'; "
                     "assert torch.cuda.is_available(), 'CUDA unavailable'; "
@@ -401,6 +485,47 @@ def validate_serving(row, image, python_version, requirements, directory, option
                     "print(torch.version.cuda, torch.cuda.get_device_name(0), x.device)",
                 ],
                 "gpu.log",
+                options.startup_timeout,
+            )
+        if requirements_only:
+            result["triton_stage"] = "client_dependency_install"
+            run(
+                [
+                    "docker",
+                    "exec",
+                    "-e",
+                    "PYTHONPATH=",
+                    name,
+                    "python3",
+                    "-m",
+                    "venv",
+                    "/tmp/client-runtime",
+                ],
+                "client-install.log",
+                options.timeout,
+            )
+            run(
+                client_command(
+                    "-m",
+                    "pip",
+                    "install",
+                    "--report",
+                    "/tmp/client-install-report.json",
+                    "tritonclient[http,grpc]",
+                    "pandas",
+                ),
+                "client-install.log",
+                options.timeout,
+            )
+            run(
+                client_command(
+                    "/validation.py",
+                    "--model",
+                    row["case"],
+                    "--write-contract",
+                    "/tmp/model-contract.json",
+                ),
+                "client-contract.log",
                 options.startup_timeout,
             )
         result["triton_stage"] = "server_start"
@@ -413,13 +538,18 @@ def validate_serving(row, image, python_version, requirements, directory, option
                     "docker",
                     "exec",
                     name,
-                    "python3",
+                    model_python,
                     "/validation.py",
                     "--model",
                     row["case"],
                     "--device",
                     "gpu",
                     "--native-gpu-reference",
+                    *(
+                        ["--contract", "/tmp/model-contract.json"]
+                        if requirements_only
+                        else []
+                    ),
                 ],
                 "native-gpu.log",
                 options.inference_timeout,
@@ -442,11 +572,7 @@ def validate_serving(row, image, python_version, requirements, directory, option
         )
         result["triton_stage"] = "inference_comparison"
         run(
-            [
-                "docker",
-                "exec",
-                name,
-                "python3",
+            client_command(
                 "/validation.py",
                 "--model",
                 row["case"],
@@ -456,7 +582,7 @@ def validate_serving(row, image, python_version, requirements, directory, option
                 str(options.startup_timeout),
                 "--inference-timeout",
                 str(options.inference_timeout),
-            ],
+            ),
             "comparison.log",
             options.startup_timeout + options.inference_timeout + 30,
         )
@@ -511,6 +637,20 @@ def validate_serving(row, image, python_version, requirements, directory, option
         except Exception:
             pass
         finally:
+            if requirements_only:
+                for artifact in [
+                    "model-install-report.json",
+                    "client-install-report.json",
+                ]:
+                    try:
+                        run(
+                            ["docker", "exec", name, "cat", "/tmp/" + artifact],
+                            artifact,
+                            30,
+                        )
+                    except Exception as error:
+                        result.setdefault("dependency_audit_errors", []).append(str(error))
+                        result["triton_validation"] = "failed"
             try:
                 subprocess.run(
                     ["docker", "rm", "-f", name],
