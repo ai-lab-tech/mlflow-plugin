@@ -61,13 +61,16 @@ print(info.model_uri)
 It is the model's prediction input (DataFrame, NumPy array, named tensor dictionary,
 or supported Transformers task input), **not** a Triton HTTP request envelope.
 MLflow stores the example with the model: use appropriate non-sensitive examples.
-No training is run. Logging executes inference and reloads the saved artifact in
-the local environment, so logging requires the framework dependencies and memory
-needed to load the model. Framework packages such as torch/transformers remain
-optional plugin dependencies; install the versions required by your model.
+No training is run. By default, logging executes inference using the supplied
+model on its current device, without reloading its weights or moving it to CPU.
+Allow memory for example inference and native serialization. Set
+`validate_saved_model=True` to instead reload the saved artifact on CPU for
+validation; this requires memory for an additional model copy.
+Framework packages such as torch/transformers remain optional plugin dependencies;
+install the versions required by your model.
 
-The wrappers preserve an explicit signature. Otherwise they use MLflow's inferred
-signature and fill a missing signature from the example and saved model prediction.
+The wrappers preserve an explicit signature. Otherwise they infer one with MLflow
+from the example and model prediction.
 They reject missing/incompatible schemas before logging or registration. Native
 flavor options such as `code_paths`, requirements, sklearn's `pyfunc_predict_fn`,
 and Transformers' `task`, `processor` and `model_config` are forwarded to native
@@ -107,8 +110,9 @@ Supply an explicit signature when those dimensions need to be dynamic.
 
 `device="cpu"` is the default. `device="gpu"` emits `KIND_GPU` for PyTorch or
 Transformers; `model.py` uses the assigned Triton instance device when loading.
-Local validation currently loads on CPU even for a GPU target. Models that cannot
-load on CPU, sharded/device-mapped models, or tasks unsupported by MLflow pyfunc
+Default validation uses the supplied model's current device, independently of the
+Triton target. Optional saved-artifact validation loads on CPU even for a GPU
+target. Sharded/device-mapped models or tasks unsupported by MLflow pyfunc
 need a separate adapter; the wrapper does not claim universal model support.
 
 PyTorch uses Python/pickle packaging by default, **not** an implicit LibTorch/PT2
@@ -124,8 +128,9 @@ scalar DataFrame columns. Optional columns, nested/object schemas, datetime colu
 and scalar tensors require an explicit serving adapter and fail clearly rather than
 being flattened or cast speculatively.
 
-`validation.json` distinguishes saved-artifact/local mapping validation from
-actual Triton validation. Logging does **not** launch Triton, deploy a service,
+`validation.json` identifies in-memory or saved-artifact prediction validation,
+records whether the saved artifact was checked, and distinguishes local mapping
+validation from actual Triton validation. Logging does **not** launch Triton, deploy a service,
 or establish GPU correctness. The direct `triton.log_model()` API below remains available. Deployment is a separate concern.
 
 ## Log API reference
@@ -164,8 +169,9 @@ These arguments are accepted by all three framework wrappers through `**kwargs`.
 | --- | --- | --- |
 | `name` | `str`, `"model"` | MLflow logged-model name. Also supplies the Triton model name unless `triton_model_name` is set. |
 | `triton_model_name` | `str` or `None`, `None` | Triton directory and `config.pbtxt` model name. Defaults to `name`; must start with an ASCII letter or underscore, followed by ASCII letters, digits, `_` or `-`. |
-| `device` | `"cpu"` or `"gpu"`, `"cpu"` | Target Triton instance kind. sklearn accepts only `"cpu"`; PyTorch and Transformers accept both. Local packaging validation still runs on CPU. This does not choose a GPU index or start Triton. |
-| `signature` | MLflow `ModelSignature` or `None`, `None` | Explicit input **and output** schemas, or inference from the saved model and example. Explicit schemas must be compatible with the generated tensor mapping. `False` is rejected. |
+| `device` | `"cpu"` or `"gpu"`, `"cpu"` | Target Triton instance kind. sklearn accepts only `"cpu"`; PyTorch and Transformers accept both. Default validation uses the supplied model's current device. This does not move the model, choose a GPU index or start Triton. |
+| `validate_saved_model` | `bool`, `False` | By default, validate predictions and tensor mappings using the supplied model without reloading weights. Set `True` to instead reload the saved artifact on CPU and validate it, requiring memory for another copy. |
+| `signature` | MLflow `ModelSignature` or `None`, `None` | Explicit input **and output** schemas, or inference from the model and example. Explicit schemas must be compatible with the generated tensor mapping. `False` is rejected. |
 | `registered_model_name` | `str` or `None`, `None` | Create a version under this MLflow Registry name. Omit to log without registering. |
 | `await_registration_for` | seconds, `300` | MLflow wait timeout for registration, when registration is requested. |
 | `run_id` | `str` or `None`, `None` | Optional MLflow run association, forwarded to `Model.log`. Without it, MLflow applies its active-run/default behavior. |
@@ -188,7 +194,7 @@ incompatible options fail during native packaging.
 | Argument | Applies to | Default / purpose |
 | --- | --- | --- |
 | `code_paths` | All three | Native default `None`. List of local inference-code files/directories to package, e.g. custom architecture modules. Include their importable package structure; do not pass training entry points. |
-| `pip_requirements` | All three | Native default `None` (native dependency inference/defaults). Supply a requirements list or requirements-file path for a reproducible serving environment. |
+| `pip_requirements` | All three | Default `None`: use native framework defaults without model-loading dependency inference. Supply a requirements list or requirements-file path for custom dependencies and a reproducible serving environment. With `validate_saved_model=True`, native dependency inference is also enabled when no explicit environment is supplied. |
 | `extra_pip_requirements` | All three | Native default `None`. Add requirements to native defaults/inference. |
 | `conda_env` | All three | Native default `None`. Explicit environment dictionary or environment-file path. Follow native MLflow restrictions on combining it with pip requirement arguments. |
 | `pyfunc_predict_fn` | sklearn | `"predict"`. Select the estimator method used by the MLflow prediction interface, e.g. `"predict_proba"` when supported by the estimator and MLflow. This also determines the output used to infer the signature. |
@@ -199,6 +205,10 @@ incompatible options fail during native packaging.
 | `processor` | Transformers | Native default `None`. Task-specific processor where required; model/tokenizer components otherwise belong in the pipeline or component dictionary. |
 | `model_config` | Transformers | Native default `None`. Saved inference configuration, e.g. `{"max_new_tokens": 32, "do_sample": False}`. Options must be supported by the task and MLflow prediction interface. |
 | `save_pretrained` | Transformers | Native default `True`. Must not be `False`: Triton needs the model and tokenizer assets saved locally. |
+
+Default logging skips MLflow's automatic dependency inference because it can
+reload the saved model in a subprocess. Framework defaults may omit custom
+dependencies; supply them with `pip_requirements` or `extra_pip_requirements`.
 
 Custom architecture code and third-party dependencies must be available when the
 saved artifact is reloaded. `code_paths` bundles local code; requirement arguments
@@ -268,11 +278,17 @@ registration was requested. `triton.load_model(info.model_uri)` returns a local
 This optional call only retrieves the generated repository; it does not load model
 weights, regenerate the repository or load it into a running Triton server.
 
-Before logging/registration, the wrapper saves the native model, reloads it,
-executes the example prediction, derives/checks the signature and validates the
-input/output tensor mapping. Unsupported schemas, missing custom code, invalid
-devices or failed predictions raise an exception. A successful return means local
-packaging validation passed; actual Triton serving and GPU execution must be
+Before logging/registration, the wrapper executes the example prediction using
+MLflow's prediction adapter around the supplied model, derives/checks the signature,
+saves the native model and validates the input/output tensor mapping. It reuses
+the existing weights. Unsupported schemas, invalid devices or failed predictions
+raise an exception. A successful default return does not establish that the saved
+artifact can be reloaded in another environment.
+
+Use `validate_saved_model=True` to instead validate a CPU reload of the saved
+artifact, including whether its custom code can be imported locally. The original
+model remains in memory during this check. `validation.json` records the selected
+mode and validation device; actual Triton serving and GPU execution must be
 tested separately. There are no `deploy`, `validate_triton`, `max_batch_size` or
 GPU-index arguments in these wrappers.
 

@@ -155,8 +155,11 @@ Native and Triton packages both contain the weights, so allow for duplicate stor
 
 ## What this validates
 
-The wrapper reloads its saved artifact, predicts the example request and checks
-the Triton tensor mapping locally. `triton_validation` remains `not_run`.
+By default, the wrapper predicts the example request using the supplied model
+and checks the Triton tensor mapping locally without reloading model weights.
+Set `validate_saved_model=True` on a framework wrapper to instead reload and
+validate the saved artifact on CPU, requiring memory for another model copy.
+`validation.json` records the mode; `triton_validation` remains `not_run`.
 This is not a numerical benchmark or a claim of live Triton compatibility.
 The self-authored example inputs are schema/inference probes, not accuracy tests.
 

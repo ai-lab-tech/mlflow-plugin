@@ -26,7 +26,7 @@ from mlflow_triton import (
 )
 from mlflow_triton._architecture import validate_init_kwargs, write_architecture
 from mlflow_triton._signature import config_text, contract_from_signature, model_config
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -207,6 +207,126 @@ class LoggingWrapperTests(unittest.TestCase):
         path = self.prepare(signature=signature)
         self.assertEqual(Model.load(path / "MLmodel").signature, signature)
 
+    def test_default_logging_skips_model_loading_and_dependency_inference(self):
+        model = fixture_model()
+        calls = []
+        original_predict = Pipeline.predict
+
+        def predict(instance, values, **kwargs):
+            calls.append(instance)
+            return original_predict(instance, values, **kwargs)
+
+        def inspect_logged_package(**kwargs):
+            path = Path(kwargs["prepared_path"])
+            report = json.loads(
+                (path / "model_repository/model/validation.json").read_text()
+            )
+            self.assertEqual(
+                report["local_validation"],
+                "in_memory_prediction_and_tensor_mapping_passed",
+            )
+            self.assertEqual(report["saved_artifact_validation"], "not_run")
+            requirements = (path / "requirements.txt").read_text()
+            self.assertIn("scikit-learn==", requirements)
+            self.assertIn("cloudpickle==", requirements)
+            return "logged"
+
+        with (
+            patch.object(Pipeline, "predict", predict),
+            patch("mlflow.pyfunc.load_model", side_effect=AssertionError("reload")),
+            patch(
+                "mlflow.models.infer_pip_requirements",
+                side_effect=AssertionError("dependency inference reload"),
+            ),
+            patch.object(Model, "log", side_effect=inspect_logged_package),
+        ):
+            result = sklearn.log_model(model, input_example=self.example)
+        self.assertEqual(result, "logged")
+        self.assertEqual(len(calls), 1)
+        self.assertIs(calls[0], model)
+
+    def test_default_requirements_keep_extra_requirements_and_constraints(self):
+        constraints = self.root / "constraints.txt"
+        constraints.write_text("numpy>=1\n")
+        extra_file = self.root / "extra.txt"
+        extra_file.write_text(f"pandas\n-c {constraints}\n")
+        for index, extra in enumerate((["pandas"], str(extra_file))):
+            with (
+                self.subTest(extra=extra),
+                patch(
+                    "mlflow.models.infer_pip_requirements",
+                    side_effect=AssertionError("dependency inference reload"),
+                ),
+            ):
+                path = self.root / f"extra-{index}"
+                _logging.prepare_model(
+                    "sklearn",
+                    fixture_model(),
+                    path,
+                    input_example=self.example,
+                    extra_pip_requirements=extra,
+                )
+                requirements = (path / "requirements.txt").read_text()
+                self.assertIn("scikit-learn==", requirements)
+                self.assertIn("pandas", requirements)
+                if isinstance(extra, str):
+                    self.assertIn("-c constraints.txt", requirements)
+                    self.assertIn("numpy>=1", (path / "constraints.txt").read_text())
+
+    def test_in_memory_validation_uses_selected_sklearn_prediction_method(self):
+        model = LogisticRegression()
+        model.classes_ = np.array([0, 1])
+        model.coef_ = np.array([[1.0, -1.0]])
+        model.intercept_ = np.array([0.0])
+        model.n_features_in_ = 2
+        values = self.example.to_numpy()
+        expected = model.predict_proba(values)
+        path = self.root / "probabilities"
+        _logging.prepare_model(
+            "sklearn",
+            model,
+            path,
+            input_example=values,
+            pyfunc_predict_fn="predict_proba",
+        )
+        signature = Model.load(path / "MLmodel").signature
+        self.assertEqual(list(signature.outputs.inputs[0].shape), [-1, 2])
+        np.testing.assert_array_equal(
+            mlflow.pyfunc.load_model(str(path)).predict(values), expected
+        )
+
+    def test_saved_artifact_validation_is_explicit_and_reported(self):
+        with patch.object(
+            _runtime, "load_predictor", wraps=_runtime.load_predictor
+        ) as load:
+            path = self.prepare(validate_saved_model=True)
+        load.assert_called_once()
+        report = json.loads(
+            (path / "model_repository/model/validation.json").read_text()
+        )
+        self.assertEqual(
+            report["local_validation"],
+            "saved_artifact_prediction_and_tensor_mapping_passed",
+        )
+        self.assertEqual(report["saved_artifact_validation"], "passed")
+        self.assertEqual(report["validation_device"], "cpu")
+
+    def test_saved_artifact_validation_failure_prevents_logging(self):
+        with (
+            patch.object(
+                _runtime, "load_predictor", side_effect=ImportError("missing code")
+            ),
+            patch.object(Model, "log") as log,
+        ):
+            with self.assertRaisesRegex(ImportError, "missing code"):
+                sklearn.log_model(
+                    fixture_model(),
+                    input_example=self.example,
+                    validate_saved_model=True,
+                    pip_requirements=["scikit-learn"],
+                )
+            log.assert_not_called()
+
     def test_invalid_signature_does_not_log(self):
         # Arrange
         signature = mlflow.models.ModelSignature(
@@ -307,13 +427,20 @@ class LoggingWrapperTests(unittest.TestCase):
                 "wrapper", artifact_location=(self.root / "artifacts").as_uri()
             )
             with mlflow.start_run(experiment_id=experiment):
-                info = sklearn.log_model(
-                    fixture_model(),
-                    input_example=self.example,
-                    name="wrapped",
-                    registered_model_name="wrapped",
-                    pip_requirements=["scikit-learn"],
-                )
+                with (
+                    patch("mlflow.pyfunc.load_model") as reload,
+                    patch("mlflow.models.utils._validate_serving_input") as validate,
+                    patch("mlflow.models.infer_pip_requirements") as infer,
+                ):
+                    info = sklearn.log_model(
+                        fixture_model(),
+                        input_example=self.example,
+                        name="wrapped",
+                        registered_model_name="wrapped",
+                    )
+                    reload.assert_not_called()
+                    validate.assert_not_called()
+                    infer.assert_not_called()
             metadata = mlflow.models.get_model_info(info.model_uri)
             self.assertIsNotNone(metadata.signature)
             self.assertEqual(
@@ -410,6 +537,51 @@ class LoggingWrapperTests(unittest.TestCase):
         for key, tensor in restored.state_dict().items():
             torch.testing.assert_close(tensor, original[key], rtol=0, atol=0)
         self.assertTrue((path / "model_repository/model/1/model.py").exists())
+
+    @unittest.skipUnless(
+        importlib.util.find_spec("torch"), "Optional torch dependency is not installed"
+    )
+    def test_pytorch_logging_reuses_original_weights_for_gpu_target(self):
+        import torch
+
+        model = torch.nn.Linear(2, 1).double().eval()
+        values = np.array([[2.0, 4.0], [6.0, 7.0]])
+        original = {key: tensor.clone() for key, tensor in model.state_dict().items()}
+        calls = []
+        original_forward = torch.nn.Linear.forward
+
+        def forward(instance, inputs):
+            calls.append(instance)
+            return original_forward(instance, inputs)
+
+        def inspect_logged_package(**kwargs):
+            path = Path(kwargs["prepared_path"])
+            repository = path / "model_repository/model"
+            self.assertIn("KIND_GPU", (repository / "config.pbtxt").read_text())
+            report = json.loads((repository / "validation.json").read_text())
+            self.assertEqual(report["validation_device"], "cpu")
+            self.assertEqual(report["saved_artifact_validation"], "not_run")
+            self.assertIn("torch==", (path / "requirements.txt").read_text())
+            return "logged"
+
+        with (
+            patch.object(torch.nn.Linear, "forward", forward),
+            patch("torch.load", side_effect=AssertionError("weight reload")),
+            patch("mlflow.pyfunc.load_model", side_effect=AssertionError("reload")),
+            patch(
+                "mlflow.models.infer_pip_requirements",
+                side_effect=AssertionError("dependency inference reload"),
+            ),
+            patch.object(Model, "log", side_effect=inspect_logged_package),
+        ):
+            result = pytorch.log_model(model, input_example=values, device="gpu")
+        self.assertEqual(result, "logged")
+        self.assertEqual(len(calls), 1)
+        self.assertIs(calls[0], model)
+        self.assertFalse(model.training)
+        for key, tensor in model.state_dict().items():
+            self.assertEqual(str(tensor.device), "cpu")
+            torch.testing.assert_close(tensor, original[key], rtol=0, atol=0)
 
     @unittest.skipUnless(
         importlib.util.find_spec("torch"), "Optional torch dependency is not installed"
@@ -548,29 +720,69 @@ class LoggingWrapperTests(unittest.TestCase):
             "text-generation", model=model, tokenizer=tokenizer, device=-1
         )
         path = self.root / "hf"
+        model_config = {
+            "max_new_tokens": 2,
+            "do_sample": False,
+            "return_full_text": True,
+        }
+        expected = mlflow.transformers._TransformersWrapper(
+            predictor, model_config=model_config
+        ).predict(["hello"])
         with patch.dict(
             os.environ, {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
         ):
-            _logging.prepare_model(
-                "transformers",
-                predictor,
-                path,
-                input_example=["hello"],
-                model_config={
-                    "max_new_tokens": 2,
-                    "do_sample": False,
-                    "return_full_text": True,
-                },
-                model_card=ModelCard("---\nlanguage: en\n---\nLocal test fixture"),
-                pip_requirements=["transformers", "torch"],
-            )
+            with (
+                patch("mlflow.pyfunc.load_model") as reload,
+                patch("mlflow.transformers.infer_pip_requirements") as infer,
+            ):
+                _logging.prepare_model(
+                    "transformers",
+                    predictor,
+                    path,
+                    input_example=["hello"],
+                    model_config=model_config,
+                    model_card=ModelCard("---\nlanguage: en\n---\nLocal test fixture"),
+                    pip_requirements=["transformers", "torch"],
+                )
+                reload.assert_not_called()
+                infer.assert_not_called()
             reloaded = mlflow.transformers.load_model(str(path))
             self.assertEqual(reloaded.tokenizer.chat_template, tokenizer.chat_template)
             pyfunc = mlflow.pyfunc.load_model(str(path))
             embedded = mlflow.pyfunc.load_model(
                 str(path / "model_repository/model/1/artifact")
             )
-            self.assertEqual(pyfunc.predict(["hello"]), embedded.predict(["hello"]))
+            self.assertEqual(pyfunc.predict(["hello"]), expected)
+            self.assertEqual(embedded.predict(["hello"]), expected)
+
+            # Even on a host with a GPU available, a component dictionary must
+            # keep the supplied model on CPU and avoid loading another copy.
+            components_path = self.root / "hf-components"
+            components = {"model": model, "tokenizer": tokenizer}
+            with (
+                patch("torch.cuda.is_available", return_value=True),
+                patch("torch.nn.Module.to", side_effect=AssertionError("model moved")),
+                patch("mlflow.pyfunc.load_model") as reload,
+                patch("mlflow.transformers.infer_pip_requirements") as infer,
+            ):
+                _logging.prepare_model(
+                    "transformers",
+                    components,
+                    components_path,
+                    task="text-generation",
+                    input_example=["hello"],
+                    model_config=model_config,
+                    model_card=ModelCard("---\nlanguage: en\n---\nLocal test fixture"),
+                    pip_requirements=["transformers", "torch"],
+                )
+                reload.assert_not_called()
+                infer.assert_not_called()
+            self.assertEqual(set(components), {"model", "tokenizer"})
+            self.assertEqual(str(model.device), "cpu")
+            self.assertEqual(
+                mlflow.pyfunc.load_model(str(components_path)).predict(["hello"]),
+                expected,
+            )
         report = json.loads((path / "architecture.json").read_text())
         self.assertTrue(report["model_class"].endswith("GPT2LMHeadModel"))
         self.assertIn("tokenizer", report["components"])

@@ -48,15 +48,80 @@ def _validate_inputs(
         )
 
 
-def _validate_saved_model(native, flavor, input_example, signature):
+def _in_memory_predictor(native_flavor, flavor, model, signature, save_kwargs):
+    """Use MLflow's serving adapters without loading or copying model weights."""
+    predict_fn = "predict"
+    validation_device = "cpu"
+    if flavor == "sklearn":
+        implementation = native_flavor._SklearnModelWrapper(model)
+        predict_fn = save_kwargs.get("pyfunc_predict_fn", "predict")
+    elif flavor == "pytorch":
+        tensor = next(model.parameters(), None)
+        if tensor is None:
+            tensor = next(model.buffers(), None)
+        validation_device = str(tensor.device) if tensor is not None else "cpu"
+        implementation = native_flavor._PyTorchWrapper(model, validation_device)
+    else:
+        if isinstance(model, dict):
+            native_flavor._validate_transformers_model_dict(model)
+            components = dict(model)
+            # Pipeline construction otherwise chooses the first available GPU.
+            # Keep the supplied weights on their existing device.
+            if getattr(model["model"], "hf_device_map", None) is None:
+                components["device"] = getattr(model["model"], "device", -1)
+            model = native_flavor._build_pipeline_from_model_input(
+                components, task=save_kwargs.get("task")
+            )
+        model_config = dict(save_kwargs.get("model_config") or {})
+        prompt_template = save_kwargs.get("prompt_template")
+        if prompt_template is not None and model.task == "text-generation":
+            model_config.setdefault("return_full_text", False)
+        implementation = native_flavor._TransformersWrapper(
+            model,
+            model_config=model_config,
+            prompt_template=prompt_template,
+        )
+        validation_device = str(model.device)
+    predictor = mlflow.pyfunc.PyFuncModel(
+        Model(signature=signature), implementation, predict_fn=predict_fn
+    )
+    return model, predictor, validation_device
+
+
+def _set_default_requirements(native_flavor, flavor, model, save_kwargs):
+    """Avoid native dependency inference, which reloads models in a subprocess."""
+    if (
+        save_kwargs.get("pip_requirements") is not None
+        or save_kwargs.get("conda_env") is not None
+    ):
+        return
+    if flavor == "transformers":
+        requirements = native_flavor.get_default_pip_requirements(model.model)
+    elif flavor == "sklearn":
+        serialization = save_kwargs.get(
+            "serialization_format", native_flavor.SERIALIZATION_FORMAT_CLOUDPICKLE
+        )
+        options = {"include_cloudpickle": serialization == "cloudpickle"}
+        if serialization == "skops":
+            options["include_skops"] = True
+        requirements = native_flavor.get_default_pip_requirements(**options)
+    else:
+        requirements = native_flavor.get_default_pip_requirements()
+    extra = save_kwargs.pop("extra_pip_requirements", None)
+    if extra is not None:
+        requirements = [
+            *requirements,
+            *(["-r " + extra] if isinstance(extra, str) else extra),
+        ]
+    save_kwargs["pip_requirements"] = requirements
+
+
+def _validate_prediction(native, flavor, input_example, signature, output):
     metadata = Model.load(native / "MLmodel")
     if "python_function" not in metadata.flavors:
         raise ValueError(
             "This model has no supported MLflow Python prediction interface"
         )
-    # Validate the saved artifact, not just the original in-memory object.
-    predictor = _runtime.load_predictor(native, flavor)
-    output = predictor.predict(input_example)
     selected = signature if signature is not None else metadata.signature
     if selected is None or (
         signature is None and (selected.inputs is None or selected.outputs is None)
@@ -104,6 +169,8 @@ def _assemble_repository(
     device,
     signature,
     input_example,
+    validate_saved_model,
+    validation_device,
 ):
     # Make only the independent serving copy. Move directories on the same disk
     # instead of recopying the complete package into its final location.
@@ -130,13 +197,20 @@ def _assemble_repository(
     (repository / "validation.json").write_text(
         json.dumps(
             {
-                "local_validation": "saved_artifact_prediction_and_tensor_mapping_passed",
+                "local_validation": (
+                    "saved_artifact_prediction_and_tensor_mapping_passed"
+                    if validate_saved_model
+                    else "in_memory_prediction_and_tensor_mapping_passed"
+                ),
+                "saved_artifact_validation": "passed"
+                if validate_saved_model
+                else "not_run",
                 "triton_validation": "not_run",
                 "signature_origin": "supplied"
                 if signature is not None
                 else "mlflow_inferred",
                 "shape_policy": "signature_dimensions; no extra dynamic axes guessed",
-                "validation_device": "cpu",
+                "validation_device": validation_device,
             },
             indent=2,
         )
@@ -161,12 +235,15 @@ def prepare_model(
     architecture_init_kwargs=None,
     triton_model_name="model",
     device="cpu",
+    validate_saved_model=False,
     **save_kwargs,
 ):
     """Validate and atomically publish a native model plus serving repository."""
     _validate_inputs(
         flavor, model, input_example, signature, triton_model_name, device, save_kwargs
     )
+    if not isinstance(validate_saved_model, bool):
+        raise ValueError("validate_saved_model must be a bool")
     validate_init_kwargs(architecture_init_kwargs)
     destination = Path(path)
     if destination.exists() or destination.is_symlink():
@@ -180,15 +257,28 @@ def prepare_model(
     ) as temporary:
         staging = Path(temporary)
         native = staging / "native"
+        selected = signature
+        validation_device = "cpu"
+        if not validate_saved_model:
+            model, predictor, validation_device = _in_memory_predictor(
+                native_flavor, flavor, model, signature, save_kwargs
+            )
+            output = predictor.predict(input_example)
+            if selected is None:
+                selected = infer_signature(input_example, output)
+            _set_default_requirements(native_flavor, flavor, model, save_kwargs)
         native_flavor.save_model(
             model,
             str(native),
-            signature=signature,
+            signature=selected,
             input_example=input_example,
             **save_kwargs,
         )
-        metadata, contract = _validate_saved_model(
-            native, flavor, input_example, signature
+        if validate_saved_model:
+            predictor = _runtime.load_predictor(native, flavor)
+            output = predictor.predict(input_example)
+        metadata, contract = _validate_prediction(
+            native, flavor, input_example, selected, output
         )
         write_architecture(native, flavor, model, architecture_init_kwargs)
         package = _assemble_repository(
@@ -200,14 +290,16 @@ def prepare_model(
             device,
             signature,
             input_example,
+            validate_saved_model,
+            validation_device,
         )
         if destination.exists() or destination.is_symlink():
             raise FileExistsError("Destination already exists: " + str(destination))
         package.rename(destination)
 
 
-def save_model(path, prepared_path, mlflow_model=None):
-    """MLflow Model.log flavor hook; all checks precede logging/registration."""
+def save_model(path, prepared_path, mlflow_model=None, validate_serving_input=False):
+    """MLflow hook; validate_serving_input is consumed by Model.log itself."""
     shutil.copytree(prepared_path, path, dirs_exist_ok=True)
     saved = Model.load(Path(path) / "MLmodel")
     target = mlflow_model or Model()
@@ -227,6 +319,7 @@ def log_native_model(
     signature=None,
     triton_model_name=None,
     device="cpu",
+    validate_saved_model=False,
     registered_model_name=None,
     await_registration_for=300,
     run_id=None,
@@ -245,6 +338,7 @@ def log_native_model(
             signature=signature,
             triton_model_name=name if triton_model_name is None else triton_model_name,
             device=device,
+            validate_saved_model=validate_saved_model,
             metadata=metadata,
             **save_kwargs,
         )
@@ -259,4 +353,7 @@ def log_native_model(
             tags=tags,
             params=params,
             prepared_path=str(prepared),
+            # Model.log otherwise reloads the model to validate its serving input.
+            # prepare_model has already validated the requested prediction mode.
+            validate_serving_input=False,
         )

@@ -99,8 +99,11 @@ MLflow model artifact/
         └── artifact/            # Self-contained native MLflow model
 ```
 
-The generated runtime loads the packaged artifact locally. Logging validates
-saved-model prediction and tensor mappings; it does **not** launch Triton.
+The generated runtime loads the packaged artifact locally. By default, logging
+validates predictions using the supplied model and checks tensor mappings without
+reloading weights. Set `validate_saved_model=True` to instead validate a CPU reload
+of the saved artifact, requiring memory for another copy. Logging does **not**
+launch Triton.
 Triton execution is a separate validation step. Dependencies must be installed
 in a compatible serving environment.
 
