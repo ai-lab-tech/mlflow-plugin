@@ -270,7 +270,8 @@ class ServingValidationTests(unittest.TestCase):
         )
         self.assertIn("tritonclient[http,grpc]", client_install)
         self.assertIn(
-            "PYTHONPATH=/tmp/client-runtime/lib/python3.11/site-packages", client_install
+            "PYTHONPATH=/tmp/client-runtime/lib/python3.11/site-packages",
+            client_install,
         )
         reference = next(c for c in commands if "--native-gpu-reference" in c)
         self.assertIn("/tmp/model-runtime/bin/python", reference)
@@ -314,7 +315,9 @@ class ServingValidationTests(unittest.TestCase):
 
         def checked_import(name, *args, **kwargs):
             if name.startswith("tritonclient"):
-                raise AssertionError("Native reference imported HTTP client dependencies")
+                raise AssertionError(
+                    "Native reference imported HTTP client dependencies"
+                )
             return original_import(name, *args, **kwargs)
 
         with (
