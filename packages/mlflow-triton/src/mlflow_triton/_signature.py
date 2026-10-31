@@ -6,6 +6,8 @@ import re
 import numpy as np
 from mlflow.types.schema import ColSpec, DataType, TensorSpec
 
+from ._pbtxt import EnumValue, message_text
+
 _NUMPY = {
     "bool": "BOOL",
     "uint8": "UINT8",
@@ -151,27 +153,14 @@ def model_config(name, contract, device):
 
 
 def config_text(name, contract, device):
+    """Generate Protobuf text without importing Triton's versioned schema."""
     config = model_config(name, contract, device)
-    lines = [f"name: {json.dumps(name)}", 'backend: "python"', "max_batch_size: 0"]
     for direction in ("input", "output"):
-        lines.append(direction + " [")
-        for index, item in enumerate(config[direction]):
-            lines.append(
-                "  { name: "
-                + json.dumps(item["name"])
-                + " data_type: "
-                + item["data_type"]
-                + " dims: "
-                + json.dumps(item["dims"])
-                + " }"
-                + ("," if index < len(config[direction]) - 1 else "")
-            )
-        lines.append("]")
-    lines.append("instance_group [{ count: 1 kind: KIND_" + device.upper() + " }]")
-    value = config["parameters"]["mlflow_contract"]["string_value"]
-    lines.append(
-        'parameters { key: "mlflow_contract" value { string_value: '
-        + json.dumps(value)
-        + " } }"
-    )
-    return "\n".join(lines) + "\n"
+        for tensor in config[direction]:
+            tensor["data_type"] = EnumValue(tensor["data_type"])
+    for group in config["instance_group"]:
+        group["kind"] = EnumValue(group["kind"])
+    config["parameters"] = [
+        {"key": key, "value": value} for key, value in config["parameters"].items()
+    ]
+    return message_text(config)

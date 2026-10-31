@@ -20,6 +20,7 @@ pip install mlflow-triton
 Requires Python 3.10+ and MLflow >=3.14,<4. Install the framework dependencies
 appropriate to your saved model separately. This package registers no deployment
 entry point and makes no Triton Control API calls.
+`config.pbtxt` is generated in Protobuf text format, using Protobuf string escaping.
 
 ## Log native models with a required example request
 

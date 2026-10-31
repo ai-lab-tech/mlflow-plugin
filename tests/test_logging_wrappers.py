@@ -67,7 +67,8 @@ class LoggingWrapperTests(unittest.TestCase):
         return destination
 
     @unittest.skipUnless(
-        importlib.util.find_spec("tritonclient"), "tritonclient is optional"
+        importlib.util.find_spec("tritonclient"),
+        "tritonclient is optional test tooling",
     )
     def test_config_parses_multiple_inputs_and_outputs_with_triton_schema(self):
         from google.protobuf import json_format, text_format
@@ -92,6 +93,10 @@ class LoggingWrapperTests(unittest.TestCase):
             ),
             infer_signature(
                 np.ones((2, 3), dtype=np.float32), np.ones((2, 1), dtype=np.float32)
+            ),
+            infer_signature(
+                pd.DataFrame({'café"\\\n\t': ["example"]}),
+                pd.DataFrame({"结果": ["ok"]}),
             ),
         ]
         for signature in signatures:
@@ -120,6 +125,14 @@ class LoggingWrapperTests(unittest.TestCase):
                             )
                     self.assertEqual(config.backend, "python")
                     self.assertEqual(config.max_batch_size, 0)
+                    self.assertEqual(len(config.instance_group), 1)
+                    self.assertEqual(config.instance_group[0].count, 1)
+                    self.assertEqual(
+                        config.instance_group[0].kind,
+                        model_config_pb2.ModelInstanceGroup.Kind.Value(
+                            "KIND_" + device.upper()
+                        ),
+                    )
                     restored = _runtime.contract_from_config(
                         json_format.MessageToDict(
                             config, preserving_proto_field_name=True
@@ -140,7 +153,8 @@ class LoggingWrapperTests(unittest.TestCase):
                                 self.assertEqual(actual[key], expected[key])
 
     @unittest.skipUnless(
-        importlib.util.find_spec("tritonclient"), "tritonclient is optional"
+        importlib.util.find_spec("tritonclient"),
+        "tritonclient is optional test tooling",
     )
     def test_example_reader_uses_generated_config_without_contract_file(self):
         # Arrange
