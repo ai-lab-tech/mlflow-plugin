@@ -11,16 +11,16 @@
 [Deployment integration](packages/mlflow-triton-control/README.md) ·
 [Contributing](CONTRIBUTING.md)
 
-**For Data Scientists: demonstrate models in Triton and hand a serving baseline to ML Engineers.**
+**For data scientists: prepare models for Triton demos and hand them off to ML engineers for production optimization.**
 
 Log a fitted sklearn pipeline, a PyTorch module or a Hugging Face pipeline with
 an example request. The core package preserves the native MLflow model and adds
 a complete Triton Python-backend model directory: configuration, serving code,
 model assets and a local validation report.
 
-Built for Data Scientists presenting models and handing a serving baseline to
-ML Engineers. It does not retrain models or use an LLM to generate adapters.
-Production optimization and deployment operations remain separate tasks.
+Designed for demos and proofs of concept. It does not retrain models or use an
+LLM to generate adapters. Before production use, ML engineers must review,
+validate and optimize the serving implementation.
 
 ```mermaid
 flowchart LR
