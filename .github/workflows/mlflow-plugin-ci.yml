@@ -1,0 +1,182 @@
+name: MLflow packages CI
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install build ruff twine
+      - name: Check versions and formatting
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          python scripts/check_release.py
+          if [ -n "$RELEASE_TAG" ]; then
+            python scripts/check_release.py --tag "$RELEASE_TAG"
+          fi
+          ruff check packages tests scripts
+          ruff format --check packages tests scripts
+      - name: Build distributions
+        run: |
+          python -m build packages/mlflow-triton --outdir dist/core
+          python -m build packages/mlflow-triton-control --outdir dist/control
+          python -m twine check --strict dist/core/* dist/control/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+          if-no-files-found: error
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mlflow: ["3.14.0", "latest"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - name: Install core alone
+        env:
+          MLFLOW_VERSION: ${{ matrix.mlflow }}
+        run: |
+          if [ "$MLFLOW_VERSION" = latest ]; then
+            python -m pip install dist/core/*.whl "mlflow>=3.14,<4"
+          else
+            python -m pip install dist/core/*.whl "mlflow==$MLFLOW_VERSION"
+          fi
+          python -m pip check
+      - name: Test core without Control
+        env:
+          MLFLOW_DISABLE_AGENT_HINT: "1"
+        run: python scripts/test_packages.py --package core --require-core-only
+      - name: Install and test optional Control integration
+        env:
+          MLFLOW_DISABLE_AGENT_HINT: "1"
+        run: |
+          python -m pip install dist/control/*.whl
+          python -m pip check
+          mlflow deployments help -t triton-control
+          python scripts/test_packages.py --package control
+
+  public-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify public fixture integrity without private access
+        run: python scripts/prepare_test_data.py --data-root "$RUNNER_TEMP/mlflow-public-data"
+
+  framework-tests:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mlflow: ["3.14.0", "latest"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - name: Install CPU framework test dependencies
+        env:
+          MLFLOW_VERSION: ${{ matrix.mlflow }}
+        run: |
+          python -m pip install "torch==2.9.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "transformers==4.57.1" "tritonclient[grpc]"
+          if [ "$MLFLOW_VERSION" = latest ]; then
+            python -m pip install dist/core/*.whl "mlflow>=3.14,<4"
+          else
+            python -m pip install dist/core/*.whl "mlflow==$MLFLOW_VERSION"
+          fi
+          python -m pip check
+      - name: Run core tests with framework coverage required
+        env:
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
+          MLFLOW_DISABLE_AGENT_HINT: "1"
+        run: python scripts/test_packages.py --package core --require-core-only --fail-on-skip
+
+  publish-core:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build, test, framework-tests, public-data]
+    runs-on: ubuntu-latest
+    environment: pypi-core
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/core/
+
+  publish-control:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [test, framework-tests, public-data, publish-core]
+    runs-on: ubuntu-latest
+    environment: pypi-control
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/control/
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [publish-core, publish-control]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - name: Create GitHub Release with package distributions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/core/* dist/control/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "$RELEASE_TAG" \
+            --generate-notes

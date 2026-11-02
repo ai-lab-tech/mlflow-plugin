@@ -1,0 +1,7 @@
+# Saved test artifacts (Git LFS)
+examples/data/**/*.safetensors filter=lfs diff=lfs merge=lfs -text
+examples/data/**/*.joblib filter=lfs diff=lfs merge=lfs -text
+examples/data/**/*.pkl filter=lfs diff=lfs merge=lfs -text
+examples/data/**/*.pt filter=lfs diff=lfs merge=lfs -text
+examples/data/**/*.pth filter=lfs diff=lfs merge=lfs -text
+examples/data/**/*.npz filter=lfs diff=lfs merge=lfs -text

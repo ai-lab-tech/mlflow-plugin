@@ -1,0 +1,33 @@
+{
+  "sources": [
+    {
+      "repository": "jcjohnson/pytorch-examples",
+      "revision": "0003fcdc606a79951e53bf8f46f8574fa4739f23",
+      "path": "nn/two_layer_net_module.py",
+      "url": "https://raw.githubusercontent.com/jcjohnson/pytorch-examples/0003fcdc606a79951e53bf8f46f8574fa4739f23/nn/two_layer_net_module.py",
+      "sha256": "d7634b2c14b71ac722b7ac9e125af9c69ce69c5385674f91bdbe2b81a9494dfc",
+      "bundle_path": "two_layer_net_module.py"
+    }
+  ],
+  "training_evidence": {
+    "execution": "complete original training program, unchanged",
+    "parameter_state_changed": true,
+    "initial_state_sha256": "d08bb59b8df43b268e9cadfe0c3ad14598bc9d174505d59deee1212d75808b3c",
+    "trained_state_sha256": "7bd571bb88645f373fdd789fa831f3a29cdfa8622b46490e6935b4b0e567060d"
+  },
+  "input_shapes": [
+    [
+      256,
+      1000
+    ]
+  ],
+  "input_dtypes": [
+    "float32"
+  ],
+  "producer_python": "3.14.4",
+  "artifact_files": {
+    "requirements.txt": "0ea1a1e7a975391bcdb773832931ab94f1197038bf3fcab660c00f3df4e06ccb",
+    "two_layer_net_module.py": "d7634b2c14b71ac722b7ac9e125af9c69ce69c5385674f91bdbe2b81a9494dfc",
+    "weights.pt": "658c93180d3fbfc1b931d54458da7c0aa5ff63f6ec557118de92d19377bc4f6d"
+  }
+}
