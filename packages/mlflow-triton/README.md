@@ -181,7 +181,9 @@ List the generated files in the artifact store without downloading them:
 from mlflow import MlflowClient
 
 triton_path = info.flavors["triton"]["data"]
-for artifact in MlflowClient().list_logged_model_artifacts(info.model_id, path=triton_path):
+for artifact in MlflowClient().list_logged_model_artifacts(
+    info.model_id, path=triton_path
+):
     print(artifact.path, "directory" if artifact.is_dir else "file")
 ```
 
