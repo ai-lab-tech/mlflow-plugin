@@ -20,6 +20,9 @@ before logging if you use a remote server.
 
 Pass an already-trained model and a representative prediction input. These
 examples assume the model and input variables already exist.
+For a complete runnable example, see [quickstart.py](https://github.com/ai-lab-tech/mlflow-plugin/blob/main/examples/quickstart.py).
+You can also [run the example in Google Colab](https://colab.research.google.com/github/ai-lab-tech/mlflow-plugin/blob/main/examples/quickstart_colab.ipynb),
+including installation and an optional download of the Triton serving files.
 
 ### scikit-learn
 
@@ -46,15 +49,14 @@ info = pytorch.log_model(
     loaded_model.eval(),
     name="network",
     input_example=example_numpy_array,
-    device="gpu",
-    code_paths=["inference_architecture"],
-    pip_requirements="requirements-serving.txt",
 )
 ```
 
 Pass an instantiated `torch.nn.Module` with trained weights loaded and all
-submodules in evaluation mode. Replace the example paths with your own custom
-architecture code and serving requirements.
+submodules in evaluation mode. For GPU serving, add `device="gpu"`.
+If your model needs custom architecture code or dependencies, supply them with
+`code_paths=["inference_architecture"]` and
+`pip_requirements="requirements-serving.txt"`, replacing these paths with your own.
 
 ### Hugging Face Transformers
 
@@ -104,7 +106,7 @@ artifact and generated request files, so use non-sensitive examples.
 | `triton_model_name` | `None` | Override the Triton name. Start with an ASCII letter or `_`; remaining characters may also include digits and `-`. |
 | `device` | `"cpu"` | Triton serving target: `"cpu"` or `"gpu"`. sklearn supports CPU only. Does not move the supplied model or select a GPU index. |
 | `signature` | `None` | MLflow `ModelSignature` with input and output schemas. Inferred from the example and prediction when omitted; `False` is unsupported. |
-| `validate_saved_model` | `False` | Reload the saved model on CPU for validation. See [validation](#validation-and-limitations). |
+| `validate_saved_model` | `False` | When `True`, reload the saved model on CPU for validation. See [validation](#validation-and-limitations). |
 | `registered_model_name` | `None` | Create a version in the MLflow Model Registry. |
 | `await_registration_for` | `300` | Registration wait timeout in seconds. |
 | `run_id` | `None` | Associate the model with an MLflow run; otherwise MLflow applies its default run behavior. |

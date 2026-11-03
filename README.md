@@ -61,6 +61,10 @@ Configure your MLflow tracking URI and experiment before logging if needed.
 
 See the [Python API guide](packages/mlflow-triton/README.md) for PyTorch and
 Transformers examples, arguments and optional file retrieval.
+For a runnable example that creates its own small model, install `scikit-learn`
+and run [`python examples/quickstart.py`](examples/quickstart.py) from this checkout.
+Or run the [Google Colab notebook](https://colab.research.google.com/github/ai-lab-tech/mlflow-plugin/blob/main/examples/quickstart_colab.ipynb)
+without a local installation; it includes an optional download of the serving files.
 For installation from source, see [development setup](CONTRIBUTING.md#development-setup).
 
 ## Serving and validation
@@ -82,8 +86,11 @@ for supported inputs and model requirements.
 
 ## Send an example request
 
-From the generated model directory, with the model loaded in Triton, send the
-single generated `request.json`. Replace `classifier` with your Triton model name:
+First [retrieve the generated files](packages/mlflow-triton/README.md#retrieve-triton-files-optional)
+and deploy the model using your tooling or the
+[Triton Control integration](packages/mlflow-triton-control/README.md).
+Once the model is ready in Triton, run the following from the retrieved model
+directory. Replace the server address and `classifier` with your deployment's values:
 
 ```bash
 curl --fail-with-body --show-error -X POST \
