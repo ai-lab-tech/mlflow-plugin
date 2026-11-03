@@ -15,6 +15,7 @@ from mlflow.models import Model, infer_signature
 from . import _runtime
 from ._architecture import validate_init_kwargs, write_architecture
 from ._request import write_request_example
+from ._requirements import serving_requirements
 from ._signature import config_text, contract_from_signature, validate_serving_options
 
 
@@ -186,14 +187,9 @@ def _assemble_repository(
     shutil.copyfile(Path(_runtime.__file__), version / "model.py")
     (repository / "config.pbtxt").write_text(config)
     write_request_example(repository, input_example, contract)
-    requirements = (
-        (package / "requirements.txt").read_text()
-        if (package / "requirements.txt").exists()
-        else ""
+    (repository / "requirements.txt").write_text(
+        serving_requirements(package, mlflow.__version__), encoding="utf-8"
     )
-    if not any(line.strip().startswith("mlflow") for line in requirements.splitlines()):
-        requirements += f"\nmlflow=={mlflow.__version__}\n"
-    (repository / "requirements.txt").write_text(requirements)
     (repository / "validation.json").write_text(
         json.dumps(
             {

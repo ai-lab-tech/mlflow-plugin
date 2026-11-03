@@ -26,6 +26,7 @@ from mlflow_triton import (
 )
 from mlflow_triton._architecture import validate_init_kwargs, write_architecture
 from mlflow_triton._signature import config_text, contract_from_signature, model_config
+from packaging.requirements import Requirement
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -281,6 +282,7 @@ class LoggingWrapperTests(unittest.TestCase):
         self.assertIs(calls[0], model)
 
     def test_default_requirements_keep_extra_requirements_and_constraints(self):
+        # Arrange
         constraints = self.root / "constraints.txt"
         constraints.write_text("numpy>=1\n")
         extra_file = self.root / "extra.txt"
@@ -294,6 +296,8 @@ class LoggingWrapperTests(unittest.TestCase):
                 ),
             ):
                 path = self.root / f"extra-{index}"
+
+                # Act
                 _logging.prepare_model(
                     "sklearn",
                     fixture_model(),
@@ -302,11 +306,26 @@ class LoggingWrapperTests(unittest.TestCase):
                     extra_pip_requirements=extra,
                 )
                 requirements = (path / "requirements.txt").read_text()
+                repository = path / "model_repository/model"
+                serving_requirements = (repository / "requirements.txt").read_text()
+
+                # Assert
                 self.assertIn("scikit-learn==", requirements)
                 self.assertIn("pandas", requirements)
                 if isinstance(extra, str):
                     self.assertIn("-c constraints.txt", requirements)
                     self.assertIn("numpy>=1", (path / "constraints.txt").read_text())
+                    serving = {
+                        item.name: item
+                        for item in map(Requirement, serving_requirements.splitlines())
+                    }
+                    self.assertEqual(str(serving["numpy"].specifier), ">=1")
+                    self.assertIn(
+                        "numpy>=1",
+                        (repository / "1/artifact/constraints.txt").read_text(),
+                    )
+                self.assertNotIn("-c constraints.txt", serving_requirements)
+                self.assertFalse((repository / "constraints.txt").exists())
 
     def test_in_memory_validation_uses_selected_sklearn_prediction_method(self):
         model = LogisticRegression()

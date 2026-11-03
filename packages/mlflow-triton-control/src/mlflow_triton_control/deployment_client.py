@@ -15,7 +15,7 @@ from mlflow.exceptions import MlflowException
 from ._model_uri import resolve_deployment_artifacts
 
 _NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
-_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
+_MODEL = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
 
 
 def target_help() -> str:

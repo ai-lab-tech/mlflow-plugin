@@ -204,6 +204,14 @@ Generated directory layout:
     artifact/         # Self-contained MLflow model, code and assets
 ```
 
+The serving `requirements.txt` is standalone: requirements and constraints from
+MLflow's saved environment are combined into package requirements, without `-r`
+or `-c` file references. Constraint-only packages become explicit serving
+dependencies and will also be installed. Version restrictions and environment
+markers are retained. Unsupported pip options or local file dependencies fail
+packaging rather than producing an unusable deployment file. MLflow's native
+environment files inside the saved artifact remain unchanged.
+
 Install the recorded dependencies in a serving environment compatible with
 Triton's Python backend. Logging stores two model copies so the Triton directory
 can be deployed independently; allow enough disk space for both and temporary files.

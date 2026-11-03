@@ -93,6 +93,81 @@ class DeploymentClientTests(unittest.TestCase):
         self.assertEqual(payload["model_name"], "classifier")
         self.assertEqual(payload["requirements_txt"], "scikit-learn==1.7.2\n")
 
+    def test_core_model_names_are_preserved_in_deployment_payload(self):
+        for model_name in ("_classifier", "_", "Classifier_2-v1"):
+            with self.subTest(model_name=model_name):
+                # Arrange
+                metadata = SimpleNamespace(
+                    flavors={
+                        "triton": {
+                            "data": f"model_repository/{model_name}",
+                            "model_name": model_name,
+                        }
+                    }
+                )
+                with (
+                    patch(
+                        "mlflow_triton_control._model_uri.get_model_info",
+                        return_value=metadata,
+                    ),
+                    patch.object(
+                        self.client,
+                        "_request",
+                        side_effect=[
+                            {"id": 7, "name": "training"},
+                            {"instance_id": 42},
+                            {"name": "iris", "status": "ready"},
+                        ],
+                    ) as request,
+                ):
+                    # Act
+                    deployment = self.client.create_deployment(
+                        "iris",
+                        "models:/m-123",
+                        config={"s3_profile_name": "training", "image": "triton:test"},
+                    )
+
+                # Assert
+                payload = request.call_args_list[1].kwargs["json"]
+                self.assertEqual(payload["model_name"], model_name)
+                self.assertEqual(payload["deployment_name"], "iris")
+                self.assertEqual(
+                    payload["model_uri"],
+                    f"s3://models/dev/model_repository/{model_name}",
+                )
+                self.assertEqual(deployment["status"], "ready")
+
+    def test_model_names_outside_core_rules_do_not_create_deployment(self):
+        for model_name in ("1classifier", "classifier.v1", "-classifier", "bad name"):
+            with self.subTest(model_name=model_name):
+                # Arrange
+                with (
+                    patch(
+                        "mlflow_triton_control.deployment_client.resolve_deployment_artifacts",
+                        return_value=DeploymentArtifacts(
+                            f"s3://models/dev/model_repository/{model_name}"
+                        ),
+                    ),
+                    patch.object(
+                        self.client,
+                        "_request",
+                        return_value={"id": 7, "name": "training"},
+                    ) as request,
+                ):
+                    # Act / Assert
+                    with self.assertRaisesRegex(MlflowException, "Resolved model URI"):
+                        self.client.create_deployment(
+                            "iris",
+                            "models:/m-123",
+                            config={
+                                "s3_profile_name": "training",
+                                "image": "triton:test",
+                            },
+                        )
+                request.assert_called_once_with(
+                    "GET", "/api/s3-profiles/resolve", params={"name": "training"}
+                )
+
     def test_resolution_failure_does_not_create_deployment(self):
         with (
             patch(
