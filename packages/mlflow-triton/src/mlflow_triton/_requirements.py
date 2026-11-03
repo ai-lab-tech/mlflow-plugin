@@ -66,11 +66,18 @@ def serving_requirements(package: Path, mlflow_version: str) -> str:
     requirements = (
         list(_read_requirements(source, root, frozenset())) if source.exists() else []
     )
-    if not any(
-        canonicalize_name(item.name) in {"mlflow", "mlflow-skinny"}
+    mlflow_requirements = [
+        item
         for item in requirements
-    ):
-        requirements.append(Requirement(f"mlflow=={mlflow_version}"))
+        if canonicalize_name(item.name) in {"mlflow", "mlflow-skinny"}
+    ]
+    if not any(item.marker is None for item in mlflow_requirements):
+        # A marker may exclude MLflow on the serving host. Require it there too,
+        # without adding a version pin that conflicts with an active user pin.
+        fallback = (
+            "mlflow>=3.14,<4" if mlflow_requirements else f"mlflow=={mlflow_version}"
+        )
+        requirements.append(Requirement(fallback))
     merged = {}
     for requirement in requirements:
         requirement.name = canonicalize_name(requirement.name)

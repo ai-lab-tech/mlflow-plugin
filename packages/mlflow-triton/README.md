@@ -211,6 +211,9 @@ dependencies and will also be installed. Version restrictions and environment
 markers are retained. Unsupported pip options or local file dependencies fail
 packaging rather than producing an unusable deployment file. MLflow's native
 environment files inside the saved artifact remain unchanged.
+If MLflow is specified only conditionally, the serving file also requires
+`mlflow>=3.14,<4` unconditionally. Applicable conditional version restrictions
+still apply, so MLflow remains available on other serving Python versions too.
 
 Install the recorded dependencies in a serving environment compatible with
 Triton's Python backend. Logging stores two model copies so the Triton directory

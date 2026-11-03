@@ -119,3 +119,48 @@ class ServingRequirementsTests(unittest.TestCase):
 
         # Assert
         self.assertEqual(text, "mlflow==3.14.0\n")
+
+    def test_conditional_mlflow_always_has_a_supported_unconditional_fallback(self):
+        for package in ("mlflow", "mlflow-skinny"):
+            for marker in ('python_version < "3.10"', 'python_version < "3.12"'):
+                with self.subTest(package=package, marker=marker):
+                    # Arrange
+                    original = Requirement(f"{package}==3.14.0; {marker}")
+                    (self.root / "requirements.txt").write_text(f"{original}\n")
+
+                    # Act
+                    text = serving_requirements(self.root, "3.17.2")
+                    requirements = list(map(Requirement, text.splitlines()))
+
+                    # Assert
+                    self.assertIn(original, requirements)
+                    fallback = next(
+                        (
+                            item
+                            for item in requirements
+                            if item.name == "mlflow" and item.marker is None
+                        ),
+                        None,
+                    )
+                    self.assertIsNotNone(fallback)
+                    self.assertIn("3.14.0", fallback.specifier)
+                    self.assertIn("3.17.2", fallback.specifier)
+                    self.assertNotIn("4.0", fallback.specifier)
+                    for python_version in ("3.11", "3.12"):
+                        active = [
+                            item
+                            for item in requirements
+                            if item.marker is None
+                            or item.marker.evaluate({"python_version": python_version})
+                        ]
+                        self.assertTrue(any(item.name == "mlflow" for item in active))
+
+    def test_unconditional_skinny_pin_is_preserved(self):
+        # Arrange
+        (self.root / "requirements.txt").write_text("mlflow-skinny==3.14.0\n")
+
+        # Act
+        text = serving_requirements(self.root, "3.17.2")
+
+        # Assert
+        self.assertEqual(text, "mlflow-skinny==3.14.0\n")
