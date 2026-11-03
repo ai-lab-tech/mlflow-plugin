@@ -11,20 +11,16 @@
 [Deployment integration](packages/mlflow-triton-control/README.md) ·
 [Contributing](CONTRIBUTING.md)
 
-**For data scientists: prepare models for Triton demos and hand them off to ML engineers for production optimization.**
+Pass a trained scikit-learn, PyTorch or Hugging Face Transformers model and an
+example prediction input. The library saves the MLflow model and generates
+Triton configuration, serving code, model assets and an example request.
 
-Log a fitted sklearn pipeline, a PyTorch module or a Hugging Face pipeline with
-an example prediction input. The core package preserves the native MLflow model and adds
-a complete Triton Python-backend model directory: configuration, serving code,
-model assets and a local validation report.
-
-Designed for demos and proofs of concept. It does not retrain models or use an
-LLM to generate adapters. Before production use, ML engineers must review,
-validate and optimize the serving implementation.
+> Intended for demos and proofs of concept. Before production use, an ML engineer
+> must review, validate and optimize the generated serving implementation.
 
 ```mermaid
 flowchart LR
-    A[Trained model in memory + example input] --> B[Framework log_model wrapper]
+    A[Trained model + example input] --> B[log_model]
     B --> C[Native MLflow model]
     B --> D[Triton model repository]
     D -. Deploy separately .-> E[Your Triton server]
@@ -33,27 +29,20 @@ flowchart LR
 
 ## Choose your package
 
-| Package | Use it for | Requires Triton Control? |
-| --- | --- | --- |
-| **[mlflow-triton](packages/mlflow-triton/README.md)** | Log wrappers, signatures, CPU/GPU configuration and complete Triton artifacts | No |
-| **[mlflow-triton-control](packages/mlflow-triton-control/README.md)** | Deployment through the [Triton Control](https://github.com/ai-lab-tech/triton-control) API | Yes |
-
-The integration installs the matching core package and registers the MLflow
-`triton-control` deployment target. No activation flag is needed. Existing
-`mlflow_triton_control` logging imports remain compatible with the integration installed.
+| Package | Purpose |
+| --- | --- |
+| [mlflow-triton](packages/mlflow-triton/README.md) | Log models and generate Triton serving files. No Triton Control dependency. |
+| [mlflow-triton-control](packages/mlflow-triton-control/README.md) | Optional deployment through Triton Control; installs the matching core package. |
 
 ## Quick start
 
-Requires Python 3.10+. To install the latest published core release from PyPI:
+Requires Python 3.10+. Install your model's framework dependencies separately.
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade mlflow-triton
-# Install the framework/version required by your model separately.
+pip install mlflow-triton
 ```
 
-With your already-fitted pipeline and a representative input DataFrame:
+With an already-fitted pipeline and a representative input DataFrame:
 
 ```python
 from mlflow_triton import sklearn
@@ -66,81 +55,30 @@ info = sklearn.log_model(
 print(info.model_uri)
 ```
 
-The model and generated Triton serving files are now stored in MLflow at
-`info.model_uri`. No additional save or load call is needed.
+The model and generated Triton files are now stored in MLflow at `info.model_uri`.
+Configure your MLflow tracking URI and experiment before logging if needed.
+`input_example` is required and its values are saved, so use non-sensitive inputs.
 
-Configure MLflow's tracking URI and experiment before logging to choose where
-artifacts are stored. `input_example` is a required prediction input, such as a
-DataFrame; it is not a Triton HTTP request. See the
-[argument tables](packages/mlflow-triton/README.md#log-api-reference) for signatures,
-custom architectures, tokenizers, dependencies and CPU/GPU serving configuration.
+See the [Python API guide](packages/mlflow-triton/README.md) for PyTorch and
+Transformers examples, arguments and optional file retrieval.
+For installation from source, see [development setup](CONTRIBUTING.md#development-setup).
 
-To install or upgrade the optional Triton Control deployment integration:
+## Serving and validation
 
-```bash
-python -m pip install --upgrade mlflow-triton-control
-mlflow deployments help -t triton-control
-```
+| Framework | Triton target |
+| --- | --- |
+| scikit-learn | CPU |
+| PyTorch | CPU / GPU |
+| Hugging Face Transformers | CPU / GPU |
 
-The integration installs its matching core version automatically, so this command
-also works without installing the core separately. Check installed dependencies:
+Logging checks an example prediction and tensor mappings. It does not start Triton
+or deploy a service. Install the recorded dependencies in a compatible Triton
+Python backend environment and validate serving separately.
 
-```bash
-python -m pip check
-```
-
-These commands install published releases, which may differ from the current
-checkout. Before the first release or to use unreleased changes, install from
-source instead; the large example weights are not needed:
-
-```bash
-GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/ai-lab-tech/mlflow-plugin.git
-cd mlflow-plugin
-python -m pip install ./packages/mlflow-triton
-# Optional deployment integration, using the matching local core:
-python -m pip install ./packages/mlflow-triton ./packages/mlflow-triton-control
-```
-
-## What gets saved
-
-```text
-MLflow model artifact/
-├── MLmodel                      # Native flavors + Triton flavor
-├── ...                          # Native model assets
-└── model_repository/classifier/
-    ├── config.pbtxt
-    ├── requirements.txt
-    ├── request.json             # Or request.bin + request.headers for binary inputs
-    ├── validation.json
-    └── 1/
-        ├── model.py
-        └── artifact/            # Self-contained native MLflow model
-```
-
-The generated runtime loads the packaged artifact locally. By default, logging
-validates predictions using the supplied model and checks tensor mappings without
-reloading weights. Set `validate_saved_model=True` to instead validate a CPU reload
-of the saved artifact, requiring memory for another copy. Logging does **not**
-launch Triton.
-Triton execution is a separate validation step. Dependencies must be installed
-in a compatible serving environment.
-
-## Retrieve serving files locally (optional)
-
-If you need the generated files for inspection or deployment, retrieve them from
-MLflow:
-
-```python
-from mlflow_triton import triton
-
-model_directory = triton.load_model(info.model_uri)
-print(model_directory / "config.pbtxt")
-```
-
-Despite its name, `triton.load_model()` returns a local directory path, downloading
-artifacts as needed. It does not load model weights into memory or load the model
-into a running Triton server. The directory contains one model; deployment is a
-separate step using your serving tooling.
+Use your deployment tooling or the optional
+[Triton Control integration](packages/mlflow-triton-control/README.md).
+See [validation and limitations](packages/mlflow-triton/README.md#validation-and-limitations)
+for supported inputs and model requirements.
 
 ## Send an example request
 
@@ -168,48 +106,18 @@ The binary response is saved with its HTTP headers. Regenerate the example if th
 model schema or example inputs change. Neither logging nor generating these files
 sends requests automatically.
 
-## Framework support
-
-| Framework | Model supplied by the caller | Target device |
-| --- | --- | --- |
-| sklearn | Fitted estimator or preprocessing Pipeline | CPU |
-| PyTorch | Instantiated module, trained weights, `.eval()`, required custom code | CPU / GPU |
-| Hugging Face | Supported pipeline or model/tokenizer/processor components | CPU / GPU |
-
-Support follows MLflow's saved Python prediction interface. External preprocessing,
-missing architecture code, unsupported task outputs and streaming generation need
-additional integration. GPU configuration is not proof of GPU validation. Read the
-[API limitations](packages/mlflow-triton/README.md) before choosing a serving path.
-
-## Run the examples
-
-The shared catalog tracks **13 saved-model cases**. Five cases using synthetic
-training data are included here; eight cases pending license review live in the
-private test-data repository. See [data setup](examples/data/README.md) for preparing
-a combined local dataset. To run the public fixtures, retrieve their weights and
-select a writable output location:
-
-```bash
-git lfs install --local
-git lfs pull
-python examples/run_real_models.py --device cpu --output-root /path/to/test-output
-```
-
-The runner requires Docker and validates real Triton responses against native
-predictions. See [examples](examples/README.md) for GPU runs, storage requirements
-and result interpretation, and [dataset provenance](examples/data/README.md) for
-artifact origins. The example data are excluded from both Python distributions.
-
-## Project documentation
+## Documentation
 
 | Topic | Guide |
 | --- | --- |
-| Logging API and arguments | [Core package](packages/mlflow-triton/README.md) |
+| Python API and examples | [Core package](packages/mlflow-triton/README.md) |
+| Generated files and runtime details | [Advanced serving guide](packages/mlflow-triton/ADVANCED.md) |
 | Optional deployment | [Triton Control integration](packages/mlflow-triton-control/README.md) |
+| Test real Triton responses with Docker | [Example runner](examples/README.md) |
+| Example weights and provenance | [Dataset setup](examples/data/README.md) |
 | Local development and tests | [Contributing](CONTRIBUTING.md) |
-| Shared versions and publishing | [Releasing](RELEASING.md) |
+| Versions and publishing | [Releasing](RELEASING.md) |
 | Reporting vulnerabilities | [Security policy](SECURITY.md) |
-| Source and model attribution | [Third-party notices](THIRD_PARTY_NOTICES.md) |
 
 ## License and attribution
 
