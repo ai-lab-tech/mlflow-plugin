@@ -56,11 +56,17 @@ class ProtobufTextTests(unittest.TestCase):
         self.assertIn("mode: FUTURE_MODE", text)
         self.assertIn("count: 0", text)
 
-    def test_identifiers_cannot_inject_text_format_fields(self):
+    def test_field_names_cannot_inject_text_format_fields(self):
         for name in ('bad"name', "name\nother: 1", ""):
             with self.subTest(name=name):
+                # Act / Assert
                 with self.assertRaises(ValueError):
                     message_text({name: "value"})
+
+    def test_enum_names_cannot_inject_text_format_fields(self):
+        for name in ('bad"name', "name\nother: 1", ""):
+            with self.subTest(name=name):
+                # Act / Assert
                 with self.assertRaises(ValueError):
                     EnumValue(name)
 

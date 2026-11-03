@@ -123,8 +123,7 @@ For NaN/infinity or binary byte inputs, the example instead consists of
 without changing input values. Outputs are requested as binary in that case.
 
 Example files contain the supplied input values, just like MLflow's stored input
-example; use non-sensitive examples. The direct `triton.log_model()` API for
-pre-existing repositories does not generate requests because it takes no input example.
+example; use non-sensitive examples.
 
 ## Inspect model architecture without loading weights
 

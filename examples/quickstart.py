@@ -7,6 +7,7 @@ Uses scikit-learn's bundled Iris dataset. MLflow uses your configured tracking
 destination, or its local default. No Triton server is required for logging.
 """
 
+from mlflow import MlflowClient
 from sklearn.datasets import load_iris
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
@@ -26,6 +27,16 @@ def main():
         input_example=inputs.iloc[:2],
     )
     print(f"Model and Triton serving files saved to: {info.model_uri}")
+
+    client = MlflowClient()
+    triton_path = info.flavors["triton"]["data"]
+    print(f"Generated Triton directory in MLflow: {triton_path}")
+    pending = [triton_path]
+    while pending:
+        for artifact in client.list_logged_model_artifacts(info.model_id, path=pending.pop()):
+            print(f"  {artifact.path}{'/' if artifact.is_dir else ''}")
+            if artifact.is_dir:
+                pending.append(artifact.path)
 
 
 if __name__ == "__main__":

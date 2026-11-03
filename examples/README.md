@@ -8,7 +8,7 @@ Neither example requires Docker, a GPU or a running Triton server.
 | Example | How to run |
 | --- | --- |
 | [Python quick start](quickstart.py) | Install `mlflow-triton` and `scikit-learn`, then run `python examples/quickstart.py` from the repository root. |
-| [Google Colab notebook](https://colab.research.google.com/github/ai-lab-tech/mlflow-plugin/blob/main/examples/quickstart_colab.ipynb) | Run the cells in order. Includes installation and an optional download of the serving files. |
+| [Google Colab notebook](https://colab.research.google.com/github/ai-lab-tech/mlflow-plugin/blob/main/examples/quickstart_colab.ipynb) | Run the cells in order. Includes installation and lists generated artifact paths without downloading model weights. |
 
 ## Saved-model serving validation
 

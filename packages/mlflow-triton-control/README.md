@@ -8,29 +8,77 @@ pip install mlflow-triton-control
 mlflow deployments help -t triton-control
 ```
 
-For logging only, install the [core package](https://github.com/ai-lab-tech/mlflow-plugin/blob/main/packages/mlflow-triton/README.md).
-The Control integration requires a reachable Triton Control API, a user-bound
-`TRITON_CONTROL_TOKEN`, an owned S3 profile, a published Triton model repository,
-and a suitable Triton runtime image. Keep credentials out of model artifacts.
-
 ```bash
-mlflow deployments create --target triton-control://localhost:8000 \
-  --name demo --model-uri s3://models/repository/demo \
-  --flavor triton -C s3_profile_id=7 -C image=your-triton-image
+mlflow deployments create --target triton-control \
+  --name demo --model-uri models:/m-your-logged-model-id \
+  -C s3_profile_name=workflow-training -C image=your-triton-image \
+  -C wait_timeout_seconds=600
 ```
 
-The existing client supports create, list, get and delete. It accepts concrete
-`s3://` model-directory URIs; it does not upload `models:/` or `runs:/` artifacts,
-serve locally, update deployments or provide prediction. The current API adapter
-uses HTTP; use it in the same trusted network as the Control service.
+```python
+from mlflow.deployments import get_deploy_client
+
+client = get_deploy_client("triton-control")
+deployment = client.create_deployment(
+    name="iris-classifier",
+    model_uri=info.model_uri,
+    config={
+        "s3_profile_name": "workflow-training",
+        "image": "your-triton-image",
+        "wait_timeout_seconds": 600,
+    },
+)
+```
+
+## Deployment arguments
+
+The MLflow CLI and Python client use the same deployment implementation.
+
+| CLI argument | Python argument | Required / default | Meaning |
+| --- | --- | --- | --- |
+| `--target`, `-t` | `get_deploy_client(target_uri)` | Required | Plugin address for Plugin selection. |
+| `--name` | `name` | Required | New deployment name: 1–63 lowercase letters, digits or hyphens. Must start and end with a letter or digit. Example: `iris-classifier`.|
+| `--model-uri` | `model_uri` | Required | MLflow model reference. |
+| Repeated `-C key=value` | `config` | Required configuration | Deployment settings described in the next table. |
+
+### Configuration (`-C` / `config`)
+
+| Key | Required / default | Accepted value | Meaning |
+| --- | --- | --- | --- |
+| `s3_profile_name` | Required | Non-empty string | Exact name of a profile owned by the authenticated caller. |
+| `image` | Required | Non-empty container image reference | Triton serving image |
+| `wait_timeout_seconds` | Optional / `300` | Finite positive number of seconds | How long to poll for readiness after the create request succeeds. The client checks approximately every three seconds and raises `MlflowException` on timeout. A timeout does not delete the deployment. |
+
+ The requirements file for serving is read automatically from the artifact.
+
+
+## Model URI and artifact storage
+
+Supported model references:
+
+| URI | Meaning |
+| --- | --- |
+| `models:/m-...` | Logged model ID returned by the framework wrappers |
+| `models:/iris-serving/3` | Registered model version |
+| `models:/iris-serving@champion` | Registry alias resolved once at deployment time |
+| `runs:/<run-id>/<model-path>` | MLflow model stored as a run artifact |
+
+
+## Other deployment operations
+
+| Python method | Arguments | Result |
+| --- | --- | --- |
+| `list_deployments()` | None | List of deployment API records, each with `flavor="triton"`. |
+| `get_deployment(name)` | Deployment name | Deployment API record with `flavor="triton"`. |
+| `delete_deployment(name)` | Deployment name | Triton Control's deletion response. |
+
+`update_deployment()`, `predict()` and `run_local()` are not supported and raise
+`MlflowException`. Send inference requests to the deployed Triton server directly.
 
 ## Compatibility
 
-Existing imports such as `from mlflow_triton_control import sklearn, triton` still
-work when this integration is installed. These are aliases to the core modules;
-new applications should use `from mlflow_triton import sklearn, triton`.
-The deployment class and `triton-control://` target retain their existing names.
-No model artifacts are rewritten by this split.
+Existing imports such as `from mlflow_triton_control import sklearn` still
+work when this integration is installed. These are aliases to the core modules.
 
 ## How MLflow finds the plugin
 
@@ -42,7 +90,7 @@ registers the deployment target through its Python package metadata:
 triton-control = "mlflow_triton_control.deployment_client"
 ```
 
-For `--target triton-control://triton-control:8000`, MLflow looks up the
+For `--target triton-control`, MLflow looks up the
 `triton-control` entry point among installed packages, loads this module, and
 calls `TritonControlDeploymentClient.create_deployment()`. That class inherits
 from MLflow's `BaseDeploymentClient` and sends the deployment request to the
@@ -50,10 +98,6 @@ Triton Control API. MLflow reads entry-point metadata; it does not search
 through every package's source files. The package must be installed in the
 same Python environment as the `mlflow` CLI.
 
-The short hostname works when the client runs in the Service's namespace.
-For another namespace, use `triton-control://<service>.<namespace>.svc.cluster.local:8000`,
-for example `triton-control://triton-control.blabla.svc.cluster.local:8000`.
-Use the actual Service name created by your Helm release.
 
 ## Argo Workflows
 
@@ -71,9 +115,11 @@ metadata:
 
 The backend resolves the profile name and its linked Argo artifact repository
 for the submitting user. It sets `spec.artifactRepositoryRef` and injects
-`TRITON_CONTROL_TOKEN`, `TRITON_CONTROL_S3_PROFILE_ID`, and
+`TRITON_CONTROL_TOKEN`, `TRITON_CONTROL_S3_PROFILE_NAME`, and
 `TRITON_CONTROL_S3_BUCKET` into the named `script` or `container` template.
-Use the injected ID with `-C s3_profile_id="$TRITON_CONTROL_S3_PROFILE_ID"`.
+Use the name with `-C s3_profile_name="$TRITON_CONTROL_S3_PROFILE_NAME"`.
+The scoped token can resolve only that profile; it cannot list profiles or read
+their credentials. The backend keeps profile IDs internal.
 The token is valid for 60 minutes and limited
 to the specified deployment and S3 profile. The Workflow receives a five-minute
 completion TTL unless it already defines one, and the Secret receives a
@@ -81,15 +127,5 @@ Workflow owner reference for garbage collection.
 
 The opted-in Workflow must have a fixed `metadata.name` and run in the Triton
 Control namespace. Direct submissions to Argo bypass this token injection.
-
-## S3 deployment of logged models
-
-The Triton flavor now stores data under `model/<original-model-name>/` inside
-the MLflow Model. Pass the concrete S3 URI of that subdirectory to the deployment
-plugin, using an S3 profile that can read the artifact bucket. Resolve proxy
-artifact locations against the managed server's S3 root; the deployment client
-continues to accept only S3 URIs. Existing models using `data: model` remain
-loadable. 
-
 
 See the [shared release process](https://github.com/ai-lab-tech/mlflow-plugin/blob/main/RELEASING.md).

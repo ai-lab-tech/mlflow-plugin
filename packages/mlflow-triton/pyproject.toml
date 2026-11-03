@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlflow-triton"
-version = "0.4.1"
+version = "0.4.2"
 description = "MLflow logging wrappers and portable Triton model repositories"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,6 +13,7 @@ license-files = ["LICENSE"]
 dependencies = [
     "mlflow>=3.14,<4",
     "protobuf>=3.20.3",
+    "packaging>=24.2",
 ]
 
 [project.urls]
