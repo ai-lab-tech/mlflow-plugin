@@ -20,7 +20,7 @@ SPEC.loader.exec_module(serving)
 
 
 class ServingValidationTests(unittest.TestCase):
-    def test_numeric_string_and_nonfinite_binary_comparison(self):
+    def comparison_fixture(self):
         expected = {
             "score": np.array([1.0, np.nan, np.inf], dtype=np.float32),
             "label": np.array(["Berlin"]),
@@ -33,18 +33,41 @@ class ServingValidationTests(unittest.TestCase):
             {"name": "score", "datatype": "FP32"},
             {"name": "label", "datatype": "BYTES"},
         ]
-        serving.compare_outputs(actual, expected, specs)
+        return expected, actual, specs
+
+    def test_numeric_string_and_nonfinite_binary_comparison(self):
+        # Arrange
+        expected, actual, specs = self.comparison_fixture()
+
+        # Act
+        report = serving.comparison_result(actual, expected, specs)
+
+        # Assert
+        self.assertEqual(report["status"], "passed")
+
+    def test_changed_values_dtype_or_shape_are_rejected(self):
+        expected, actual, specs = self.comparison_fixture()
         for replacement in [
             np.array([2.0, np.nan, np.inf], dtype=np.float32),
             expected["score"].astype(np.float64),
             np.array([1], dtype=np.float32),
         ]:
-            with self.assertRaises(AssertionError):
-                serving.compare_outputs(
-                    {**actual, "score": replacement}, expected, specs
-                )
+            with self.subTest(dtype=replacement.dtype, shape=replacement.shape):
+                # Arrange
+                invalid = {**actual, "score": replacement}
+
+                # Act / Assert
+                with self.assertRaises(AssertionError):
+                    serving.compare_outputs(invalid, expected, specs)
+
+    def test_missing_output_is_rejected(self):
+        # Arrange
+        expected, actual, specs = self.comparison_fixture()
+        del actual["label"]
+
+        # Act / Assert
         with self.assertRaises(AssertionError):
-            serving.compare_outputs({"score": actual["score"]}, expected, specs)
+            serving.compare_outputs(actual, expected, specs)
 
     def run_scenario(
         self,

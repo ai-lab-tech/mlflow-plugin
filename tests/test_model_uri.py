@@ -45,8 +45,12 @@ class ModelUriTests(unittest.TestCase):
                     side_effect=AssertionError("weights download"),
                 ),
             ):
+                # Act
+                resolved_uri = resolver.resolve_model_uri(model_uri)
+
+                # Assert
                 self.assertEqual(
-                    resolver.resolve_model_uri(model_uri),
+                    resolved_uri,
                     "s3://bucket/models/m-123/model_repository/classifier",
                 )
                 resolve.assert_called_once_with(model_uri)
@@ -66,8 +70,12 @@ class ModelUriTests(unittest.TestCase):
             ),
             patch.object(resolver, "get_model_info", return_value=self.metadata),
         ):
+            # Act
+            resolved_uri = resolver.resolve_model_uri("models:/iris@champion")
+
+            # Assert
             self.assertEqual(
-                resolver.resolve_model_uri("models:/iris@champion"),
+                resolved_uri,
                 "s3://bucket/run/model/model_repository/classifier",
             )
 
@@ -91,8 +99,12 @@ class ModelUriTests(unittest.TestCase):
             ) as creds,
             patch.object(resolver, "http_request", return_value=response) as request,
         ):
+            # Act
+            resolved_uri = resolver.resolve_model_uri("models:/m-123")
+
+            # Assert
             self.assertEqual(
-                resolver.resolve_model_uri("models:/m-123"),
+                resolved_uri,
                 "s3://bucket/team/mlflow/3/models/m-123/artifacts/model_repository/classifier",
             )
             creds.assert_called_once_with("https://control/api/mlflow/tracking")
@@ -103,22 +115,27 @@ class ModelUriTests(unittest.TestCase):
             )
 
     def test_direct_storage_paths_are_rejected_without_artifact_access(self):
-        for model_uri in [
+        # Arrange
+        references = [
             "s3://bucket/repository/classifier",
             "file:///tmp/classifier",
             "https://storage/classifier",
-        ]:
-            with (
-                self.subTest(model_uri=model_uri),
-                patch.object(resolver, "get_model_info") as metadata,
-                patch.object(resolver, "_read_requirements") as read,
+        ]
+        for model_uri in references:
+            for resolve in (
+                resolver.resolve_model_uri,
+                resolver.resolve_deployment_artifacts,
             ):
-                with self.assertRaisesRegex(MlflowException, "models:/ or runs:/"):
-                    resolver.resolve_model_uri(model_uri)
-                with self.assertRaisesRegex(MlflowException, "models:/ or runs:/"):
-                    resolver.resolve_deployment_artifacts(model_uri)
-                metadata.assert_not_called()
-                read.assert_not_called()
+                with (
+                    self.subTest(model_uri=model_uri, operation=resolve.__name__),
+                    patch.object(resolver, "get_model_info") as metadata,
+                    patch.object(resolver, "_read_requirements") as read,
+                ):
+                    # Act / Assert
+                    with self.assertRaisesRegex(MlflowException, "models:/ or runs:/"):
+                        resolve(model_uri)
+                    metadata.assert_not_called()
+                    read.assert_not_called()
 
     def test_missing_flavor_or_unsafe_data_is_rejected(self):
         flavors = [
@@ -198,9 +215,13 @@ class ModelUriTests(unittest.TestCase):
             ):
                 resolver.resolve_model_uri("models:/m-123")
 
-    def test_unexpected_proxy_authority_and_non_s3_destination_are_rejected(self):
+    def test_unexpected_proxy_authority_is_rejected(self):
+        # Act / Assert
         with self.assertRaises(MlflowException):
             resolver._s3_location("mlflow-artifacts://other-host/model")
+
+    def test_non_s3_proxy_destination_is_rejected(self):
+        # Arrange
         response = Mock()
         response.json.return_value = {"artifact_root": "file:///tmp/artifacts"}
         with (
@@ -238,21 +259,24 @@ class ModelUriTests(unittest.TestCase):
                     "iris", "s3://bucket/model-version", run_id=run.info.run_id
                 )
                 client.set_registered_model_alias("iris", "champion", version.version)
-                self.assertEqual(
-                    resolver._artifact_uri("models:/iris@champion"),
-                    "s3://bucket/model-version",
-                )
-                self.assertEqual(
-                    resolver._artifact_uri(f"runs:/{run.info.run_id}/model"),
-                    run.info.artifact_uri + "/model",
-                )
                 logged = client.create_logged_model(
                     experiment_id=experiment, name="classifier"
                 )
-                self.assertEqual(
-                    resolver._artifact_uri(f"models:/{logged.model_id}"),
-                    logged.artifact_location,
-                )
+                references = [
+                    ("models:/iris@champion", "s3://bucket/model-version"),
+                    (
+                        f"runs:/{run.info.run_id}/model",
+                        run.info.artifact_uri + "/model",
+                    ),
+                    (f"models:/{logged.model_id}", logged.artifact_location),
+                ]
+                for reference, expected in references:
+                    with self.subTest(reference=reference):
+                        # Act
+                        resolved_uri = resolver._artifact_uri(reference)
+
+                        # Assert
+                        self.assertEqual(resolved_uri, expected)
         finally:
             mlflow.set_tracking_uri(tracking)
             mlflow.set_registry_uri(registry)

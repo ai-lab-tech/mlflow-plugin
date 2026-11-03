@@ -150,15 +150,15 @@ class DeploymentClientTests(unittest.TestCase):
 
 class DeploymentTargetEnvironmentTests(unittest.TestCase):
     def test_short_target_uses_injected_backend_url(self):
-        for target in ["triton-control"]:
-            with (
-                self.subTest(target=target),
-                patch.dict(
-                    os.environ, {"TRITON_CONTROL_URL": "https://custom-control:9443/"}
-                ),
-            ):
-                client = TritonControlDeploymentClient(target)
-                self.assertEqual(client._base_url, "https://custom-control:9443")
+        # Arrange
+        with patch.dict(
+            os.environ, {"TRITON_CONTROL_URL": "https://custom-control:9443/"}
+        ):
+            # Act
+            client = TritonControlDeploymentClient("triton-control")
+
+        # Assert
+        self.assertEqual(client._base_url, "https://custom-control:9443")
 
     def test_only_plugin_name_is_accepted_even_with_valid_environment(self):
         for target in [

@@ -31,26 +31,51 @@ class GeneratedRequirementsTests(unittest.TestCase):
             "download_artifacts",
             wraps=mlflow.artifacts.download_artifacts,
         ) as download:
-            self.assertEqual(resolver._read_requirements(self.uri), expected)
+            # Act
+            actual = resolver._read_requirements(self.uri)
+
+        # Assert
+        self.assertEqual(actual, expected)
         self.assertEqual(download.call_count, 1)
         self.assertEqual(
             download.call_args.kwargs["artifact_uri"], self.uri + "/requirements.txt"
         )
         self.assertFalse(Path(download.call_args.kwargs["dst_path"]).exists())
 
-    def test_missing_file_is_optional_and_empty_file_is_preserved(self):
-        self.assertIsNone(resolver._read_requirements(self.uri))
-        (self.repository / "requirements.txt").write_text("")
-        self.assertEqual(resolver._read_requirements(self.uri), "")
+    def test_missing_file_is_optional(self):
+        # Arrange: setUp creates a repository without requirements.txt.
 
-    def test_invalid_utf8_directory_or_oversized_file_fails(self):
-        requirements = self.repository / "requirements.txt"
+        # Act
+        requirements = resolver._read_requirements(self.uri)
+
+        # Assert
+        self.assertIsNone(requirements)
+
+    def test_empty_file_is_preserved(self):
+        # Arrange
+        (self.repository / "requirements.txt").write_text("")
+
+        # Act
+        requirements = resolver._read_requirements(self.uri)
+
+        # Assert
+        self.assertEqual(requirements, "")
+
+    def test_invalid_utf8_or_oversized_file_fails(self):
         for content in [b"\xff", b"x" * (1024 * 1024 + 1)]:
-            requirements.write_bytes(content)
-            with self.assertRaisesRegex(MlflowException, "Could not read"):
-                resolver._read_requirements(self.uri)
-        requirements.unlink()
-        requirements.mkdir()
+            with self.subTest(size=len(content)):
+                # Arrange
+                (self.repository / "requirements.txt").write_bytes(content)
+
+                # Act / Assert
+                with self.assertRaisesRegex(MlflowException, "Could not read"):
+                    resolver._read_requirements(self.uri)
+
+    def test_requirements_directory_is_rejected(self):
+        # Arrange
+        (self.repository / "requirements.txt").mkdir()
+
+        # Act / Assert
         with self.assertRaises(MlflowException):
             resolver._read_requirements(self.uri)
 

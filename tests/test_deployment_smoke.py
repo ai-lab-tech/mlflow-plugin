@@ -1,5 +1,6 @@
 """Optional deployment entry-point smoke test."""
 
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -17,15 +18,8 @@ class DeploymentSmokeTests(unittest.TestCase):
         def handle(request):
             requests.append(request)
             if request.url.path == "/api/s3-profiles/resolve":
-                self.assertEqual(request.url.params["name"], "training")
                 return httpx.Response(200, json={"id": 7, "name": "training"})
             if request.method == "POST":
-                import json
-
-                self.assertEqual(
-                    json.loads(request.content)["requirements_txt"],
-                    "scikit-learn==1.7.2\n",
-                )
                 return httpx.Response(200, json={"instance_id": 42})
             if request.method == "DELETE":
                 return httpx.Response(200, json={"message": "deleted"})
@@ -74,6 +68,11 @@ class DeploymentSmokeTests(unittest.TestCase):
             deleted = client.delete_deployment("iris")
 
         # Assert
+        self.assertEqual(requests[0].url.params["name"], "training")
+        self.assertEqual(
+            json.loads(requests[1].content)["requirements_txt"],
+            "scikit-learn==1.7.2\n",
+        )
         self.assertIsInstance(client, TritonControlDeploymentClient)
         self.assertEqual(created["flavor"], "triton")
         self.assertEqual(deployments, [created])

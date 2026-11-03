@@ -22,7 +22,7 @@ Pass an already-trained model and a representative prediction input. These
 examples assume the model and input variables already exist.
 For a complete runnable example, see [quickstart.py](https://github.com/ai-lab-tech/mlflow-plugin/blob/main/examples/quickstart.py).
 You can also [run the example in Google Colab](https://colab.research.google.com/github/ai-lab-tech/mlflow-plugin/blob/main/examples/quickstart_colab.ipynb),
-including installation and an optional download of the Triton serving files.
+including installation and a listing of the generated Triton artifact paths.
 
 ### scikit-learn
 

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -104,6 +105,13 @@ class LoggingWrapperTests(unittest.TestCase):
                     contract = contract_from_signature(signature, "pytorch")
                     config = model_config_pb2.ModelConfig()
                     text_format.Parse(config_text("example", contract, device), config)
+                    restored = _runtime.contract_from_config(
+                        json_format.MessageToDict(
+                            config, preserving_proto_field_name=True
+                        )
+                    )
+
+                    # Assert
                     for field, specs in [
                         (config.input, contract["inputs"]),
                         (config.output, contract["outputs"]),
@@ -131,11 +139,6 @@ class LoggingWrapperTests(unittest.TestCase):
                         model_config_pb2.ModelInstanceGroup.Kind.Value(
                             "KIND_" + device.upper()
                         ),
-                    )
-                    restored = _runtime.contract_from_config(
-                        json_format.MessageToDict(
-                            config, preserving_proto_field_name=True
-                        )
                     )
                     for direction in ("inputs", "outputs"):
                         for actual, expected in zip(
@@ -175,30 +178,40 @@ class LoggingWrapperTests(unittest.TestCase):
         pd.testing.assert_frame_equal(restored, self.example)
 
     def test_every_public_wrapper_requires_example_before_logging(self):
+        # Arrange
+        cases = [
+            ({}, TypeError, None),
+            ({"input_example": None}, ValueError, "required"),
+        ]
         for wrapper in (sklearn, pytorch, transformers):
-            with (
-                self.subTest(wrapper=wrapper.__name__),
-                patch.object(Model, "log") as log,
-            ):
-                with self.assertRaises(TypeError):
-                    wrapper.log_model(object())
-                with self.assertRaisesRegex(ValueError, "required"):
-                    wrapper.log_model(object(), input_example=None)
-                log.assert_not_called()
+            for options, error, message in cases:
+                with (
+                    self.subTest(wrapper=wrapper.__name__, options=options),
+                    patch.object(Model, "log") as log,
+                ):
+                    # Act / Assert
+                    with self.assertRaisesRegex(error, message or ".*"):
+                        wrapper.log_model(object(), **options)
+                    log.assert_not_called()
 
     def test_saved_pipeline_native_and_triton_copy_have_same_predictions(self):
         path = self.prepare()
         metadata = Model.load(path / "MLmodel")
-        self.assertEqual(
-            set(metadata.flavors), {"sklearn", "python_function", "triton"}
-        )
         repository = path / metadata.flavors["triton"]["data"]
         native = mlflow.pyfunc.load_model(str(path))
         packaged = mlflow.pyfunc.load_model(str(repository / "1/artifact"))
         held_out = pd.DataFrame({"left": [10.0, -4.0, 0.0], "right": [1.0, 16.0, 4.0]})
         expected = fixture_model().predict(held_out)
-        np.testing.assert_array_equal(native.predict(held_out), expected)
-        np.testing.assert_array_equal(packaged.predict(held_out), expected)
+        # Act
+        native_prediction = native.predict(held_out)
+        packaged_prediction = packaged.predict(held_out)
+
+        # Assert
+        self.assertEqual(
+            set(metadata.flavors), {"sklearn", "python_function", "triton"}
+        )
+        np.testing.assert_array_equal(native_prediction, expected)
+        np.testing.assert_array_equal(packaged_prediction, expected)
         text = (repository / "config.pbtxt").read_text()
         self.assertIn('backend: "python"', text)
         self.assertIn("max_batch_size: 0", text)
@@ -218,7 +231,10 @@ class LoggingWrapperTests(unittest.TestCase):
     def test_supplied_signature_is_preserved(self):
         signature = infer_signature(self.example, fixture_model().predict(self.example))
         path = self.prepare(signature=signature)
-        self.assertEqual(Model.load(path / "MLmodel").signature, signature)
+        metadata = Model.load(path / "MLmodel")
+
+        # Assert
+        self.assertEqual(metadata.signature, signature)
 
     def test_default_logging_skips_model_loading_and_dependency_inference(self):
         model = fixture_model()
@@ -229,19 +245,15 @@ class LoggingWrapperTests(unittest.TestCase):
             calls.append(instance)
             return original_predict(instance, values, **kwargs)
 
-        def inspect_logged_package(**kwargs):
+        captured = {}
+
+        def capture_logged_package(**kwargs):
             path = Path(kwargs["prepared_path"])
             report = json.loads(
                 (path / "model_repository/model/validation.json").read_text()
             )
-            self.assertEqual(
-                report["local_validation"],
-                "in_memory_prediction_and_tensor_mapping_passed",
-            )
-            self.assertEqual(report["saved_artifact_validation"], "not_run")
-            requirements = (path / "requirements.txt").read_text()
-            self.assertIn("scikit-learn==", requirements)
-            self.assertIn("cloudpickle==", requirements)
+            captured["report"] = report
+            captured["requirements"] = (path / "requirements.txt").read_text()
             return "logged"
 
         with (
@@ -251,9 +263,19 @@ class LoggingWrapperTests(unittest.TestCase):
                 "mlflow.models.infer_pip_requirements",
                 side_effect=AssertionError("dependency inference reload"),
             ),
-            patch.object(Model, "log", side_effect=inspect_logged_package),
+            patch.object(Model, "log", side_effect=capture_logged_package),
         ):
+            # Act
             result = sklearn.log_model(model, input_example=self.example)
+
+        # Assert
+        self.assertEqual(
+            captured["report"]["local_validation"],
+            "in_memory_prediction_and_tensor_mapping_passed",
+        )
+        self.assertEqual(captured["report"]["saved_artifact_validation"], "not_run")
+        self.assertIn("scikit-learn==", captured["requirements"])
+        self.assertIn("cloudpickle==", captured["requirements"])
         self.assertEqual(result, "logged")
         self.assertEqual(len(calls), 1)
         self.assertIs(calls[0], model)
@@ -303,10 +325,11 @@ class LoggingWrapperTests(unittest.TestCase):
             pyfunc_predict_fn="predict_proba",
         )
         signature = Model.load(path / "MLmodel").signature
+        prediction = mlflow.pyfunc.load_model(str(path)).predict(values)
+
+        # Assert
         self.assertEqual(list(signature.outputs.inputs[0].shape), [-1, 2])
-        np.testing.assert_array_equal(
-            mlflow.pyfunc.load_model(str(path)).predict(values), expected
-        )
+        np.testing.assert_array_equal(prediction, expected)
 
     def test_saved_artifact_validation_is_explicit_and_reported(self):
         with patch.object(
@@ -431,6 +454,8 @@ class LoggingWrapperTests(unittest.TestCase):
         self.assertEqual(list(self.root.iterdir()), [destination])
 
     def test_real_log_register_and_load_keeps_both_flavors(self):
+        # Arrange
+        expected = fixture_model().predict(self.example)
         tracking, registry = mlflow.get_tracking_uri(), mlflow.get_registry_uri()
         try:
             uri = "sqlite:///" + str(self.root / "tracking.db")
@@ -445,34 +470,37 @@ class LoggingWrapperTests(unittest.TestCase):
                     patch("mlflow.models.utils._validate_serving_input") as validate,
                     patch("mlflow.models.infer_pip_requirements") as infer,
                 ):
+                    # Act
                     info = sklearn.log_model(
                         fixture_model(),
                         input_example=self.example,
                         name="wrapped",
                         registered_model_name="wrapped",
                     )
-                    reload.assert_not_called()
-                    validate.assert_not_called()
-                    infer.assert_not_called()
             metadata = mlflow.models.get_model_info(info.model_uri)
-            self.assertIsNotNone(metadata.signature)
-            self.assertEqual(
-                set(metadata.flavors), {"sklearn", "python_function", "triton"}
-            )
             model_root = Path(
                 mlflow.artifacts.download_artifacts(artifact_uri="models:/wrapped/1")
             )
             repository = model_root / metadata.flavors["triton"]["data"]
-            self.assertTrue((repository / "1/model.py").is_file())
-            np.testing.assert_array_equal(
-                mlflow.pyfunc.load_model(info.model_uri).predict(self.example),
-                fixture_model().predict(self.example),
+            prediction = mlflow.pyfunc.load_model(info.model_uri).predict(self.example)
+
+            # Assert
+            reload.assert_not_called()
+            validate.assert_not_called()
+            infer.assert_not_called()
+            self.assertIsNotNone(metadata.signature)
+            self.assertEqual(
+                set(metadata.flavors), {"sklearn", "python_function", "triton"}
             )
+            self.assertTrue((repository / "1/model.py").is_file())
+            np.testing.assert_array_equal(prediction, expected)
         finally:
             mlflow.set_tracking_uri(tracking)
             mlflow.set_registry_uri(registry)
 
     def test_generated_python_backend_executes_and_rejects_bad_requests(self):
+        # Arrange
+        expected = fixture_model().predict(self.example)
         path = self.prepare()
         version = path / "model_repository/model/1"
         spec = importlib.util.spec_from_file_location(
@@ -521,6 +549,7 @@ class LoggingWrapperTests(unittest.TestCase):
                 "left": Tensor("left", self.example.left.to_numpy()),
                 "right": Tensor("right", self.example.right.to_numpy()),
             }
+            # Act
             replies = backend.execute(
                 [inputs, {}, {**inputs, "left": Tensor("left", np.ones(2, np.int32))}]
             )
@@ -529,9 +558,8 @@ class LoggingWrapperTests(unittest.TestCase):
                 sys.modules.pop(stub_name, None)
             else:
                 sys.modules[stub_name] = previous
-        np.testing.assert_array_equal(
-            replies[0]["output_tensors"][0].value, fixture_model().predict(self.example)
-        )
+        # Assert
+        np.testing.assert_array_equal(replies[0]["output_tensors"][0].value, expected)
         self.assertIn("Missing input", replies[1]["error"])
         self.assertIn("dtype", replies[2]["error"])
 
@@ -573,7 +601,10 @@ class LoggingWrapperTests(unittest.TestCase):
             input_example=values,
             pip_requirements=["torch==" + torch.__version__],
         )
+        restored = mlflow.pytorch.load_model(str(path))
         report = json.loads((path / "architecture.json").read_text())
+
+        # Assert
         self.assertEqual(report["model_class"], "torch.nn.modules.linear.Linear")
         self.assertEqual(report["init_kwargs_origin"], "unknown")
         self.assertEqual(report["tensors"][0]["shape"], [1, 2])
@@ -581,7 +612,6 @@ class LoggingWrapperTests(unittest.TestCase):
             (path / "architecture.json").read_bytes(),
             (path / "model_repository/model/1/artifact/architecture.json").read_bytes(),
         )
-        restored = mlflow.pytorch.load_model(str(path))
         for key, tensor in restored.state_dict().items():
             torch.testing.assert_close(tensor, original[key], rtol=0, atol=0)
         self.assertTrue((path / "model_repository/model/1/model.py").exists())
@@ -602,14 +632,15 @@ class LoggingWrapperTests(unittest.TestCase):
             calls.append(instance)
             return original_forward(instance, inputs)
 
-        def inspect_logged_package(**kwargs):
+        captured = {}
+
+        def capture_logged_package(**kwargs):
             path = Path(kwargs["prepared_path"])
             repository = path / "model_repository/model"
-            self.assertIn("KIND_GPU", (repository / "config.pbtxt").read_text())
+            captured["config"] = (repository / "config.pbtxt").read_text()
             report = json.loads((repository / "validation.json").read_text())
-            self.assertEqual(report["validation_device"], "cpu")
-            self.assertEqual(report["saved_artifact_validation"], "not_run")
-            self.assertIn("torch==", (path / "requirements.txt").read_text())
+            captured["report"] = report
+            captured["requirements"] = (path / "requirements.txt").read_text()
             return "logged"
 
         with (
@@ -620,9 +651,16 @@ class LoggingWrapperTests(unittest.TestCase):
                 "mlflow.models.infer_pip_requirements",
                 side_effect=AssertionError("dependency inference reload"),
             ),
-            patch.object(Model, "log", side_effect=inspect_logged_package),
+            patch.object(Model, "log", side_effect=capture_logged_package),
         ):
+            # Act
             result = pytorch.log_model(model, input_example=values, device="gpu")
+
+        # Assert
+        self.assertIn("KIND_GPU", captured["config"])
+        self.assertEqual(captured["report"]["validation_device"], "cpu")
+        self.assertEqual(captured["report"]["saved_artifact_validation"], "not_run")
+        self.assertIn("torch==", captured["requirements"])
         self.assertEqual(result, "logged")
         self.assertEqual(len(calls), 1)
         self.assertIs(calls[0], model)
@@ -699,27 +737,32 @@ class LoggingWrapperTests(unittest.TestCase):
             pip_requirements=["torch", "numpy"],
         )
         report = json.loads((path / "architecture.json").read_text())
-        self.assertEqual(report["model_class"], "custom_network.OffsetNetwork")
-        self.assertTrue(
-            any(name.endswith("custom_network.py") for name in report["code_files"])
-        )
         source.unlink()
         script = (
             "import mlflow.pyfunc,numpy as np,sys\n"
             "model=mlflow.pyfunc.load_model(sys.argv[1])\n"
-            "np.testing.assert_array_equal(model.predict(np.array([[5.]],dtype=np.float32)), [[7.]])\n"
+            "prediction=model.predict(np.array([[5.]],dtype=np.float32))\n"
+            "np.testing.assert_array_equal(prediction, [[7.]])\n"
         )
-        subprocess.run(
+        # Act
+        result = subprocess.run(
             [
                 sys.executable,
                 "-c",
                 script,
                 str(path / "model_repository/model/1/artifact"),
             ],
-            check=True,
+            check=False,
             capture_output=True,
             text=True,
             timeout=60,
+        )
+
+        # Assert
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(report["model_class"], "custom_network.OffsetNetwork")
+        self.assertTrue(
+            any(name.endswith("custom_network.py") for name in report["code_files"])
         )
 
     @unittest.skipUnless(
@@ -767,7 +810,6 @@ class LoggingWrapperTests(unittest.TestCase):
         predictor = pipeline(
             "text-generation", model=model, tokenizer=tokenizer, device=-1
         )
-        path = self.root / "hf"
         model_config = {
             "max_new_tokens": 2,
             "do_sample": False,
@@ -776,68 +818,76 @@ class LoggingWrapperTests(unittest.TestCase):
         expected = mlflow.transformers._TransformersWrapper(
             predictor, model_config=model_config
         ).predict(["hello"])
-        with patch.dict(
-            os.environ, {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
-        ):
-            with (
-                patch("mlflow.pyfunc.load_model") as reload,
-                patch("mlflow.transformers.infer_pip_requirements") as infer,
-            ):
-                _logging.prepare_model(
-                    "transformers",
-                    predictor,
-                    path,
-                    input_example=["hello"],
-                    model_config=model_config,
-                    model_card=ModelCard("---\nlanguage: en\n---\nLocal test fixture"),
-                    pip_requirements=["transformers", "torch"],
-                )
-                reload.assert_not_called()
-                infer.assert_not_called()
-            reloaded = mlflow.transformers.load_model(str(path))
-            self.assertEqual(reloaded.tokenizer.chat_template, tokenizer.chat_template)
-            pyfunc = mlflow.pyfunc.load_model(str(path))
-            embedded = mlflow.pyfunc.load_model(
-                str(path / "model_repository/model/1/artifact")
-            )
-            self.assertEqual(pyfunc.predict(["hello"]), expected)
-            self.assertEqual(embedded.predict(["hello"]), expected)
+        cases = [
+            ("pipeline", predictor, {}),
+            (
+                "components",
+                {"model": model, "tokenizer": tokenizer},
+                {"task": "text-generation"},
+            ),
+        ]
+        for case, supplied, options in cases:
+            with self.subTest(case=case):
+                # Arrange
+                path = self.root / case
+                with patch.dict(
+                    os.environ, {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
+                ):
+                    with (
+                        ExitStack() as device_guards,
+                        patch("mlflow.pyfunc.load_model") as reload,
+                        patch("mlflow.transformers.infer_pip_requirements") as infer,
+                    ):
+                        if case == "components":
+                            device_guards.enter_context(
+                                patch("torch.cuda.is_available", return_value=True)
+                            )
+                            device_guards.enter_context(
+                                patch(
+                                    "torch.nn.Module.to",
+                                    side_effect=AssertionError("model moved"),
+                                )
+                            )
 
-            # Even on a host with a GPU available, a component dictionary must
-            # keep the supplied model on CPU and avoid loading another copy.
-            components_path = self.root / "hf-components"
-            components = {"model": model, "tokenizer": tokenizer}
-            with (
-                patch("torch.cuda.is_available", return_value=True),
-                patch("torch.nn.Module.to", side_effect=AssertionError("model moved")),
-                patch("mlflow.pyfunc.load_model") as reload,
-                patch("mlflow.transformers.infer_pip_requirements") as infer,
-            ):
-                _logging.prepare_model(
-                    "transformers",
-                    components,
-                    components_path,
-                    task="text-generation",
-                    input_example=["hello"],
-                    model_config=model_config,
-                    model_card=ModelCard("---\nlanguage: en\n---\nLocal test fixture"),
-                    pip_requirements=["transformers", "torch"],
-                )
-                reload.assert_not_called()
-                infer.assert_not_called()
-            self.assertEqual(set(components), {"model", "tokenizer"})
-            self.assertEqual(str(model.device), "cpu")
-            self.assertEqual(
-                mlflow.pyfunc.load_model(str(components_path)).predict(["hello"]),
-                expected,
-            )
-        report = json.loads((path / "architecture.json").read_text())
-        self.assertTrue(report["model_class"].endswith("GPT2LMHeadModel"))
-        self.assertIn("tokenizer", report["components"])
-        self.assertTrue(report["config_files"])
-        signature = Model.load(path / "MLmodel").signature
-        self.assertIsNotNone(signature.inputs)
-        self.assertIsNotNone(signature.outputs)
+                        # Act
+                        _logging.prepare_model(
+                            "transformers",
+                            supplied,
+                            path,
+                            input_example=["hello"],
+                            model_config=model_config,
+                            model_card=ModelCard(
+                                "---\nlanguage: en\n---\nLocal test fixture"
+                            ),
+                            pip_requirements=["transformers", "torch"],
+                            **options,
+                        )
+                    reloaded = mlflow.transformers.load_model(str(path))
+                    native_prediction = mlflow.pyfunc.load_model(str(path)).predict(
+                        ["hello"]
+                    )
+                    embedded_prediction = mlflow.pyfunc.load_model(
+                        str(path / "model_repository/model/1/artifact")
+                    ).predict(["hello"])
+                    report = json.loads((path / "architecture.json").read_text())
+                    signature = Model.load(path / "MLmodel").signature
+
+                    # Assert
+                    reload.assert_not_called()
+                    infer.assert_not_called()
+                    self.assertEqual(
+                        reloaded.tokenizer.chat_template, tokenizer.chat_template
+                    )
+                    self.assertEqual(native_prediction, expected)
+                    self.assertEqual(embedded_prediction, expected)
+                    self.assertEqual(str(model.device), "cpu")
+                    if case == "components":
+                        self.assertEqual(set(supplied), {"model", "tokenizer"})
+                    self.assertTrue(report["model_class"].endswith("GPT2LMHeadModel"))
+                    self.assertIn("tokenizer", report["components"])
+                    self.assertTrue(report["config_files"])
+                    self.assertIsNotNone(signature.inputs)
+                    self.assertIsNotNone(signature.outputs)
 
     def test_architecture_records_explicit_constructor_settings_without_loading(self):
         # Arrange
