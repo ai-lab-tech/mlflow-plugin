@@ -1,476 +1,235 @@
 # mlflow-triton
 
-> **For demos and proofs of concept — not production-ready serving.**
->
-> **Before production use, an ML Engineer must review, validate and optimize the
-> serving implementation and, where needed, convert the model to a suitable
-> production format/backend.** The generated Triton Python backend uses MLflow's
-> prediction interface as a starting point. Successful example tests do not
-> establish production readiness, throughput, latency or resource efficiency.
-
 Log a trained scikit-learn, PyTorch or Hugging Face Transformers model to MLflow
-and generate the files needed to serve it with NVIDIA Triton. Use the generated
-model repository for demos and proofs of concept. Deployment and production
-optimization are separate steps.
+with the files needed to serve it using NVIDIA Triton.
+
+> Intended for demos and proofs of concept. Before production use, an ML engineer
+> must review, validate and optimize the generated serving implementation.
+
+## Installation
 
 ```bash
 pip install mlflow-triton
 ```
 
-Requires Python 3.10+ and MLflow >=3.14,<4. Install the framework dependencies
-required by your model separately.
-
-## Quick start
-
-This example trains a small classifier and logs it to MLflow together with its
-generated Triton serving files. Install `scikit-learn` before running it. To use a remote
-MLflow server, configure your tracking URI and experiment before logging.
-
-```python
-from sklearn.datasets import load_iris
-from sklearn.linear_model import LogisticRegression
-
-from mlflow_triton import sklearn
-
-X, y = load_iris(return_X_y=True, as_frame=True)
-model = LogisticRegression(max_iter=200).fit(X, y)
-
-info = sklearn.log_model(
-    model,
-    name="iris_classifier",
-    input_example=X.iloc[:2],
-)
-
-print(info.model_uri)
-```
-
-The model and Triton serving files are now stored in MLflow at `info.model_uri`.
-Add `registered_model_name="iris-classifier"` to `log_model()` if you also want
-to create a version in the MLflow Model Registry.
+Requires Python 3.10+ and MLflow >=3.14,<4. Install your model's framework and
+other dependencies separately. Configure your MLflow tracking URI and experiment
+before logging if you use a remote server.
 
 ## Log your trained model
 
-Import the framework module from `mlflow_triton` and call its `log_model()`.
-The examples below assume you already have a trained model and representative
-prediction inputs. Replace the example variables, code paths and dependency
-versions with your own.
+Pass an already-trained model and a representative prediction input. These
+examples assume the model and input variables already exist.
+
+### scikit-learn
 
 ```python
-from mlflow_triton import sklearn, pytorch, transformers
+from mlflow_triton import sklearn
 
-# Already-fitted Pipeline, including its original preprocessing.
 info = sklearn.log_model(
     fitted_pipeline,
     name="classifier",
     input_example=example_dataframe,
-    registered_model_name="classifier",
+    registered_model_name="classifier",  # Optional: create a Registry version
 )
-
-# Instantiated custom architecture with its saved trained weights loaded.
-# Include inference-only class/helper modules, not a training entry point.
-torch_info = pytorch.log_model(
-    loaded_model.eval(),
-    name="network",
-    input_example=example_numpy_array,
-    code_paths=["inference_architecture"],
-    pip_requirements=["torch==<your-version>", "numpy==<your-version>"],
-)
-
-# A text-generation pipeline containing the model and tokenizer.
-hf_info = transformers.log_model(
-    loaded_generation_pipeline,
-    name="text_model",
-    input_example=["Example input"],
-    model_config={"max_new_tokens": 32, "do_sample": False, "return_full_text": True},
-)
-
 print(info.model_uri)
 ```
 
-`input_example` is a mandatory keyword argument even when `signature=` is supplied.
-It is the model's prediction input (DataFrame, NumPy array, named tensor dictionary,
-or supported Transformers task input), **not** a Triton HTTP request envelope.
-MLflow stores the example with the model: use appropriate non-sensitive examples.
-No training is run. By default, logging executes inference using the supplied
-model on its current device, without reloading its weights or moving it to CPU.
-Allow memory for running the example prediction and saving the model. Set
-`validate_saved_model=True` to instead reload the saved artifact on CPU for
-validation; this requires memory for an additional model copy.
-Framework packages such as torch/transformers remain optional plugin dependencies;
-install the versions required by your model.
+Include preprocessing in the fitted estimator or `Pipeline`.
 
-If you supply a `signature`, the library preserves it and checks it against the
-example. Otherwise, it infers the input and output schemas from the example and
-prediction. See the [API reference](#log-api-reference) for model saving,
-registration and validation options.
-
-## Log API reference
-
-The three framework wrappers have these public entry points (common keyword
-options are abbreviated below; the Python signatures expose them explicitly):
-
-```text
-sklearn.log_model(sk_model, *, input_example, **kwargs)
-pytorch.log_model(pytorch_model, *, input_example, **kwargs)
-transformers.log_model(transformers_model, *, input_example, **kwargs)
-```
-
-Pass the model positionally or by its exact parameter name. `input_example` and
-all other options must be keyword arguments. The tables below describe the
-logging options and framework-specific model saving options.
-
-### Required arguments
-
-| Function | Model argument | Required `input_example` |
-| --- | --- | --- |
-| `sklearn.log_model` | `sk_model`: already-fitted estimator or complete preprocessing `Pipeline`. | A non-empty DataFrame or NumPy array accepted by the saved prediction interface. Preserve column names, order and dtypes. |
-| `pytorch.log_model` | `pytorch_model`: instantiated `torch.nn.Module` with trained weights loaded; call `.eval()` first. A `state_dict` or filename alone is insufficient. | A non-empty NumPy input, or named tensor input supported by MLflow's PyTorch prediction interface. Match the model's input dtype and dimensions. |
-| `transformers.log_model` | `transformers_model`: supported Transformers pipeline, or component dictionary such as `{"model": model, "tokenizer": tokenizer}`. Include the task's required tokenizer/processor assets. | A non-empty task input supported by MLflow pyfunc, such as a list of text strings or a DataFrame with the task's input fields. |
-
-`input_example=None` and empty examples are rejected. The example remains
-mandatory with an explicit signature. It is saved in the artifact and used for
-prediction and tensor-mapping validation; it is not training data or a Triton
-HTTP request. PyTorch models with any submodule still in training mode are rejected.
-
-### Common optional arguments
-
-All three framework modules accept these keyword arguments.
-
-| Argument | Type / default | Meaning |
-| --- | --- | --- |
-| `name` | `str`, `"model"` | MLflow logged-model name. Also supplies the Triton model name unless `triton_model_name` is set. |
-| `triton_model_name` | `str` or `None`, `None` | Triton directory and `config.pbtxt` model name. Defaults to `name`; must start with an ASCII letter or underscore, followed by ASCII letters, digits, `_` or `-`. |
-| `device` | `"cpu"` or `"gpu"`, `"cpu"` | Target Triton instance kind. sklearn accepts only `"cpu"`; PyTorch and Transformers accept both. Default validation uses the supplied model's current device. This does not move the model, choose a GPU index or start Triton. |
-| `validate_saved_model` | `bool`, `False` | By default, validate predictions and tensor mappings using the supplied model without reloading weights. Set `True` to instead reload the saved artifact on CPU and validate it, requiring memory for another copy. |
-| `signature` | MLflow `ModelSignature` or `None`, `None` | Explicit input **and output** schemas, or inference from the model and example. Explicit schemas must be compatible with the generated tensor mapping. `False` is rejected. |
-| `registered_model_name` | `str` or `None`, `None` | Create a version under this MLflow Registry name. Omit to log without registering. |
-| `await_registration_for` | seconds, `300` | MLflow wait timeout for registration, when registration is requested. |
-| `run_id` | `str` or `None`, `None` | Optional MLflow run ID to associate with the model. Without it, MLflow applies its active-run/default behavior. |
-| `metadata` | `dict` or `None`, `None` | Metadata saved with the model. |
-| `tags` | `dict` or `None`, `None` | Tags for the MLflow logged model. |
-| `params` | `dict` or `None`, `None` | Parameters recorded with the MLflow logged model. These do not configure inference; use Transformers `model_config` for generation settings. |
-
-The MLflow Registry version and Triton filesystem version are independent:
-logging always generates `<triton_model_name>/1/`, even when the Registry creates
-version 2 or higher. There is no `triton_version` argument.
-
-### Model saving options
-
-Pass the options below to this library's `log_model(...)` to control how your
-model is saved, include custom Python code, and specify its dependencies. Each
-option applies only to the frameworks listed in the table. Use `name` to name
-the logged model; `artifact_path` is not supported.
-
-| Argument | Applies to | Default / purpose |
-| --- | --- | --- |
-| `code_paths` | All three | Default `None`. List of local inference-code files/directories to package, e.g. custom architecture modules. Include their importable package structure; do not pass training entry points. |
-| `pip_requirements` | All three | Default `None`: record MLflow's default framework dependencies without reloading the model to detect dependencies. Supply a requirements list or requirements-file path for custom dependencies and a reproducible serving environment. With `validate_saved_model=True`, MLflow's automatic dependency detection is also enabled when no explicit environment is supplied. |
-| `extra_pip_requirements` | All three | Default `None`. Add dependencies to MLflow's default or inferred requirements. |
-| `conda_env` | All three | Default `None`. Explicit environment dictionary or environment-file path. Follow MLflow restrictions on combining it with pip requirement arguments. |
-| `pyfunc_predict_fn` | sklearn | `"predict"`. Select the estimator method used by the MLflow prediction interface, e.g. `"predict_proba"` when supported by the estimator and MLflow. This also determines the output used to infer the signature. |
-| `serialization_format` | sklearn | Uses the installed MLflow version's default. Choose a format supported by the installed sklearn flavor. |
-| `serialization_format` | PyTorch | Default `"pickle"`. An explicit alternative must be supported by the installed MLflow version; use `validate_saved_model=True` to check that the saved model can be reloaded. No automatic graph export is performed. |
-| `pickle_module` | PyTorch | Default `None`. Optional Python module used to serialize the PyTorch model. |
-| `task` | Transformers | Default `None`. Task identifier such as `"text-classification"` or `"text-generation"`. Supply it when MLflow cannot infer the task, especially with custom models/component dictionaries. |
-| `processor` | Transformers | Default `None`. Task-specific processor where required; model/tokenizer components otherwise belong in the pipeline or component dictionary. |
-| `model_config` | Transformers | Default `None`. Saved inference configuration, e.g. `{"max_new_tokens": 32, "do_sample": False}`. Options must be supported by the task and MLflow prediction interface. |
-| `save_pretrained` | Transformers | Default `True`. Must not be `False`: Triton needs the model and tokenizer assets saved locally. |
-
-For additional options and version-specific defaults, see your installed MLflow
-version's `mlflow.<framework>.save_model` API. The library uses that API internally
-to save the model files before adding Triton support and logging the completed
-package. Options supported only by MLflow's `log_model` are not automatically
-supported here; unsupported options raise an error when saving the model.
-
-Default logging skips MLflow's automatic dependency inference because it can
-reload the saved model in a subprocess. Framework defaults may omit custom
-dependencies; supply them with `pip_requirements` or `extra_pip_requirements`.
-
-Custom architecture code and third-party dependencies must be available when the
-saved artifact is reloaded. `code_paths` bundles local code; requirement arguments
-record installable dependencies. Neither reconstructs a missing architecture.
-External preprocessing must already be part of the supplied prediction interface.
-
-For PyTorch and Transformers, you can also document constructor settings with
-[`architecture_init_kwargs`](#inspect-model-architecture-without-loading-weights).
-
-### Examples with explicit options
-
-The objects below are already loaded/fitted; these calls do not train them.
-Configure the MLflow tracking URI/experiment using MLflow's normal API before
-logging, if required for your environment.
+### PyTorch
 
 ```python
-from mlflow_triton import sklearn, pytorch, transformers
+from mlflow_triton import pytorch
 
-# sklearn: named DataFrame columns and preprocessing travel with the Pipeline.
-sk_info = sklearn.log_model(
-    sk_model=fitted_pipeline,
-    input_example=example_dataframe.iloc[:2],
-    name="classifier",
-    device="cpu",
-    pyfunc_predict_fn="predict_proba",
-    registered_model_name="demo-classifier",
-)
-
-# PyTorch: custom architecture instance, trained weights already loaded.
-pt_info = pytorch.log_model(
-    pytorch_model=loaded_model.eval(),
-    input_example=example_numpy_array[:2],
+info = pytorch.log_model(
+    loaded_model.eval(),
     name="network",
+    input_example=example_numpy_array,
     device="gpu",
     code_paths=["inference_architecture"],
     pip_requirements="requirements-serving.txt",
 )
+```
 
-# Hugging Face: a pipeline includes the tokenizer; use saved generation options.
-hf_info = transformers.log_model(
-    transformers_model=loaded_generation_pipeline,
+Pass an instantiated `torch.nn.Module` with trained weights loaded and all
+submodules in evaluation mode. Replace the example paths with your own custom
+architecture code and serving requirements.
+
+### Hugging Face Transformers
+
+```python
+from mlflow_triton import transformers
+
+info = transformers.log_model(
+    loaded_generation_pipeline,
+    name="text_generator",
     input_example=["Explain what a model signature describes."],
-    name="text-generator",
-    triton_model_name="text_generator",
-    device="gpu",
     task="text-generation",
     model_config={"max_new_tokens": 32, "do_sample": False},
 )
-
-print(hf_info.model_uri)
 ```
 
-Logging has already generated and saved the Triton repository. If you need a local
-directory to inspect or hand off to deployment tooling, optionally retrieve it:
+Pass a supported pipeline or a component dictionary such as
+`{"model": model, "tokenizer": tokenizer}`, including the task's processor assets.
+Use `model_config` for prediction settings.
 
-```python
-from mlflow_triton import triton
+All three calls return MLflow `ModelInfo`. The model and generated Triton files
+are stored at `info.model_uri`; no additional save or load call is needed.
+`info.registered_model_version` identifies the Registry version when requested.
+Logging does not start Triton or deploy a service.
 
-repository = triton.load_model(hf_info.model_uri)
-print(repository / "config.pbtxt")
-print(repository / "1/model.py")
-```
+## Log API reference
 
-### Return value and validation
+Pass the model positionally or by the parameter name below. All other arguments
+must be keyword arguments.
 
-All three calls return MLflow `ModelInfo`. Use `info.model_uri` to load the saved
-model or resolve its Triton repository, and `info.registered_model_version` when
-registration was requested. `triton.load_model(info.model_uri)` returns a local
-`pathlib.Path` to the model-name directory, downloading artifacts as necessary.
-This optional call only retrieves the generated repository; it does not load model
-weights, regenerate the repository or load it into a running Triton server.
+### Required arguments
 
-Before logging/registration, the wrapper executes the example prediction using
-MLflow's prediction adapter around the supplied model, derives/checks the signature,
-saves the native model and validates the input/output tensor mapping. It reuses
-the existing weights. Unsupported schemas, invalid devices or failed predictions
-raise an exception. A successful default return does not establish that the saved
-artifact can be reloaded in another environment.
-
-Use `validate_saved_model=True` to instead validate a CPU reload of the saved
-artifact, including whether its custom code can be imported locally. The original
-model remains in memory during this check. `validation.json` records the selected
-mode and validation device; actual Triton serving and GPU execution must be
-tested separately. There are no `deploy`, `validate_triton`, `max_batch_size` or
-GPU-index arguments in these wrappers.
-
-## Log an existing Triton model directory
-
-If you already have Triton serving files, use `triton.log_model()` to store them
-in MLflow. The directory must contain at
-least one numbered version; `config.pbtxt` may be included at
-its root. The MLflow Model contains an `MLmodel` file with a `triton` flavor
-entry and a copy of the entire directory under `model/`.
-
-```python
-from mlflow_triton import triton
-
-model_info = triton.log_model(
-    triton_model_path="/tmp/model-repository/iris_classifier",
-    name="triton-model",
-    registered_model_name="iris-serving",
-)
-print(model_info.registered_model_version)
-```
-
-`triton.load_model("models:/iris-serving/1")` downloads the registered model
-and returns the local Triton model directory. Omit `registered_model_name` to
-save a model without creating a Registry version. This API is in the plugin
-package, not in MLflow's `mlflow.triton` namespace.
-
-
-### Arguments for an existing Triton model directory
-
-This separate API packages an **existing** Triton model directory. It does not
-create `model.py`, infer a signature or change its configuration.
-
-```python
-triton.log_model(
-    triton_model_path,
-    name="triton-model",
-    registered_model_name=None,
-    await_registration_for=300,
-    run_id=None,
-    metadata=None,
-)
-```
-
-| Argument | Required / default | Meaning |
+| Module | Model parameter | `input_example` |
 | --- | --- | --- |
-| `triton_model_path` | Required | Path to one model-name directory containing at least one positive numbered version directory. Symbolic links are rejected. Pass the model directory, not the parent repository containing multiple models. |
-| `name` | `"triton-model"` | MLflow logged-model name. The existing Triton directory name and configuration are preserved. |
-| `registered_model_name` | `None` | Optional MLflow Registry name. |
+| `sklearn` | `sk_model`: fitted estimator or Pipeline | DataFrame or NumPy array accepted by the model. Preserve column names, order and dtypes. |
+| `pytorch` | `pytorch_model`: trained module in evaluation mode | NumPy array or named tensor input accepted by MLflow's PyTorch prediction interface. Match input dtype and dimensions. |
+| `transformers` | `transformers_model`: pipeline or component dictionary | Task input accepted by MLflow's prediction interface, such as a list of strings or a DataFrame. |
+
+`input_example` must be non-empty and is required even with an explicit signature.
+It is prediction input, not a Triton HTTP request. Its values are saved in the
+artifact and generated request files, so use non-sensitive examples.
+
+### Common optional arguments
+
+| Argument | Default | Purpose |
+| --- | --- | --- |
+| `name` | `"model"` | MLflow model name; also the Triton model name unless overridden. |
+| `triton_model_name` | `None` | Override the Triton name. Start with an ASCII letter or `_`; remaining characters may also include digits and `-`. |
+| `device` | `"cpu"` | Triton serving target: `"cpu"` or `"gpu"`. sklearn supports CPU only. Does not move the supplied model or select a GPU index. |
+| `signature` | `None` | MLflow `ModelSignature` with input and output schemas. Inferred from the example and prediction when omitted; `False` is unsupported. |
+| `validate_saved_model` | `False` | Reload the saved model on CPU for validation. See [validation](#validation-and-limitations). |
+| `registered_model_name` | `None` | Create a version in the MLflow Model Registry. |
 | `await_registration_for` | `300` | Registration wait timeout in seconds. |
-| `run_id` | `None` | Optional MLflow run association. |
-| `metadata` | `None` | Optional model metadata dictionary. |
+| `run_id` | `None` | Associate the model with an MLflow run; otherwise MLflow applies its default run behavior. |
+| `metadata` | `None` | Model metadata dictionary. |
+| `tags` | `None` | Logged-model tags dictionary. |
+| `params` | `None` | Tracking parameters dictionary. For Transformers generation settings, use `model_config`. |
 
-Returns MLflow `ModelInfo`. This API has no `input_example`, `signature`, `device`,
-`tags`, `params` or arbitrary `**kwargs` parameters. Configure serving directly in
-the supplied Triton directory before logging it.
+The Triton directory always uses version `1`, independently of the MLflow
+Registry version. Use `name` for the logged model; `artifact_path` is unsupported.
 
-## Generated files and serving behavior
+### Model saving options
 
-The logged artifact contains the native MLflow flavors and an additional `triton`
-flavor pointing to:
+Pass these options to the same `log_model()` call to include code, specify
+dependencies or configure serialization.
+
+| Argument | Framework | Default / purpose |
+| --- | --- | --- |
+| `code_paths` | All | `None`. Local inference-code files or directories to bundle. Preserve their importable package structure. |
+| `pip_requirements` | All | `None`. Requirements list or file path; otherwise uses MLflow's default framework dependencies. |
+| `extra_pip_requirements` | All | `None`. Add dependencies to the default or inferred requirements. |
+| `conda_env` | All | `None`. Environment dictionary or file path. Follow MLflow's restrictions on combining environment arguments. |
+| `pyfunc_predict_fn` | sklearn | `"predict"`. Prediction method, for example `"predict_proba"`. Also determines the output used to infer the signature. |
+| `serialization_format` | sklearn | Uses the installed MLflow version's default format. |
+| `serialization_format` | PyTorch | `"pickle"`. Alternatives require MLflow support; use `validate_saved_model=True` to check reloading. |
+| `pickle_module` | PyTorch | `None`. Python module used for serialization. |
+| `task` | Transformers | `None`. Task such as `"text-generation"`; provide it if MLflow cannot infer the task. |
+| `processor` | Transformers | `None`. Task-specific processor, when required. |
+| `model_config` | Transformers | `None`. Prediction settings dictionary, such as `{"max_new_tokens": 32}`. |
+| `save_pretrained` | Transformers | `True`. Must remain enabled to include local model and tokenizer assets. |
+| `architecture_init_kwargs` | PyTorch, Transformers | `None`. Constructor settings recorded as documentation; not used to reconstruct the model. See the [architecture report](ADVANCED.md#inspect-model-architecture-without-loading-weights). |
+
+Include custom dependencies explicitly: default logging skips automatic dependency
+detection to avoid reloading weights. With `validate_saved_model=True`, MLflow's
+dependency detection is enabled when no explicit environment is supplied.
+`code_paths` bundles local code; requirement arguments record installable dependencies.
+
+Additional saving options and version-specific defaults follow the installed
+MLflow version's `mlflow.<framework>.save_model` API, which the library uses
+internally to write model files. Options exclusive to MLflow's `log_model` are
+not automatically supported.
+
+## Validation and limitations
+
+By default, logging runs an example prediction with your model on its current
+device, infers or checks its signature, and validates the Triton input/output
+mapping. Invalid inputs, unsupported schemas and failed predictions raise errors.
+
+Set `validate_saved_model=True` to instead reload the saved artifact on CPU and
+validate it. This requires memory for an additional model copy. The result is
+recorded in `validation.json`. Test actual Triton serving and GPU execution separately.
+
+- Serving uses Triton's Python backend and MLflow's prediction interface. PyTorch
+  models are not automatically exported to a graph backend; streaming is unsupported.
+- Preprocessing and postprocessing must be included in the supplied prediction
+  interface. Custom architecture code must be bundled or installed.
+- Supported schemas contain NumPy-compatible numeric/string tensors or required
+  scalar DataFrame columns. Nested/object schemas, optional or datetime columns,
+  and scalar tensors need a separate adapter.
+- Generated configuration uses `max_batch_size: 0`. Supply an explicit signature
+  for dynamic dimensions that cannot be inferred from the example.
+- Sharded/device-mapped models and tasks unsupported by MLflow's prediction
+  interface need a separate adapter.
+
+## Retrieve Triton files (optional)
+
+Use this only when you need a local directory for inspection or deployment:
+
+```python
+from mlflow_triton import triton
+
+model_directory = triton.load_model(info.model_uri)
+print(model_directory / "config.pbtxt")
+```
+
+Despite its name, `triton.load_model()` returns a `pathlib.Path`, downloading files
+as needed. It does not load model weights or load a model into a running server.
+The returned directory contains one Triton model:
 
 ```text
-model_repository/<triton_model_name>/
+<triton_model_name>/
   config.pbtxt
   requirements.txt
   request.json        # Or request.bin + request.headers for binary inputs
   validation.json
   1/
     model.py
-    artifact/          # Complete local MLflow package, including code and assets
+    artifact/         # Self-contained MLflow model, code and assets
 ```
 
-`mlflow.pyfunc.load_model(info.model_uri)` and MLflow framework loaders
-remain usable for models logged with the framework wrappers. The embedded package is a separate copy so the Triton directory
-can be deployed independently; this increases artifact storage size. Dependencies
-are recorded, not installed into the running Triton server automatically. Build
-an environment from `requirements.txt` with a Python version matching Triton's
-Python backend stub; custom code dependencies must be included or installed.
+Install the recorded dependencies in a serving environment compatible with
+Triton's Python backend. Logging stores two model copies so the Triton directory
+can be deployed independently; allow enough disk space for both and temporary files.
+MLflow's framework and `pyfunc` loaders remain usable for the logged model.
 
-The generated configuration uses `backend: "python"` and `max_batch_size: 0`.
-Tensor shapes include their full batch dimension. Column schemas map to separate
-rank-one tensors; tensor schemas retain their declared shapes. The `mlflow_contract` parameter in `config.pbtxt`
-records mappings between original field names and Triton-safe tensor names.
-Only dimensions marked as dynamic in the signature are retained; a single
-example does not prove that other sequence/image dimensions are variable.
-Supply an explicit signature when those dimensions need to be dynamic.
+## Log an existing Triton model directory
 
-`device="cpu"` is the default. `device="gpu"` emits `KIND_GPU` for PyTorch or
-Transformers; `model.py` uses the assigned Triton instance device when loading.
-Default validation uses the supplied model's current device, independently of the
-Triton target. Optional saved-artifact validation loads on CPU even for a GPU
-target. Sharded/device-mapped models or tasks unsupported by MLflow pyfunc
-need a separate adapter; the wrapper does not claim universal model support.
-
-PyTorch uses Python/pickle packaging by default, **not** an implicit LibTorch/PT2
-export. Supply required architecture modules with `code_paths` or dependencies.
-Pre/postprocessing outside the supplied model/Pipeline is not captured. Transformers
-packages preserve their saved tokenizer, chat template and model configuration,
-and expose the MLflow task interface (which can differ from raw `forward()` or
-pipeline outputs). Serving is unary prediction, not streaming or a dedicated
-high-throughput LLM engine. No GGUF/Q4_K_M compatibility is implied.
-
-Supported signatures contain NumPy-compatible numeric/string tensors or required
-scalar DataFrame columns. Optional columns, nested/object schemas, datetime columns,
-and scalar tensors require an explicit serving adapter and fail clearly rather than
-being flattened or cast speculatively.
-
-`validation.json` identifies in-memory or saved-artifact prediction validation,
-records whether the saved artifact was checked, and distinguishes local mapping
-validation from actual Triton validation. Logging does **not** launch Triton, deploy a service,
-or establish GPU correctness.
-
-## Examples and optional deployment
-
-See [shared examples and validation](https://github.com/ai-lab-tech/mlflow-plugin/blob/main/examples/README.md) and the
-[repository overview](https://github.com/ai-lab-tech/mlflow-plugin/blob/main/README.md). CPU/GPU validation is performed by the
-example runner, not by starting a server inside `log_model()`.
-
-For optional Triton Control deployment, install
-[mlflow-triton-control](https://github.com/ai-lab-tech/mlflow-plugin/blob/main/packages/mlflow-triton-control/README.md). A complete Triton
-model repository is the handoff to any chosen deployment tooling.
-
-## Disk space and concurrent loading
-
-Logging creates two copies of the model: the MLflow model and a self-contained
-copy for Triton serving. Allow disk space for both copies and MLflow's temporary
-files. Set `TMPDIR` before logging to choose a temporary directory on a disk with
-enough space. Incomplete staging files are cleaned up if packaging fails.
-
-The serving runtime temporarily changes MLflow device and offline environment
-settings while loading a model, then restores them. It serializes its own model
-loads, but cannot coordinate with unrelated code that changes `os.environ` or
-loads models directly through MLflow. Use separate processes for those operations
-if they could run concurrently. Prediction requests are not serialized by this lock.
-
-## MLflow mapping in Triton configuration
-
-Generated repositories store the MLflow-specific mapping as JSON in the
-`parameters.mlflow_contract.string_value` field of `config.pbtxt`. It contains a
-mapping version, framework flavor, input/output structure (columns, single tensor
-or named tensors), original field names and text/binary semantics. Tensor names
-link mapping entries to the standard `input` and `output` configuration fields;
-datatypes and shapes are read exclusively from those fields.
-
-Triton passes the configuration to `model.py.initialize()` as `args["model_config"]`.
-The runtime validates and reconstructs its tensor mapping from it. Device placement
-still comes from Triton's assigned instance kind/device ID. No separate
-`contract.json` is generated or read by the new runtime. Unsupported mapping
-versions, missing tensor mappings and nonzero `max_batch_size` fail initialization.
-
-Existing logged artifacts retain their original `model.py` and `contract.json`.
-Re-log a model to produce the new layout; do not mix old generated runtime files
-with new configuration. Editing a mapping or tensor schema must remain compatible
-with the saved model's prediction interface and requires renewed validation.
-
-## Ready-to-send inference example
-
-Each framework wrapper generates one `request.json` beside `config.pbtxt`, using
-values from `input_example`, concrete tensor shapes and all configured output names.
-See the [central request instructions](https://github.com/ai-lab-tech/mlflow-plugin#send-an-example-request)
-for curl commands. No per-model shell script or instruction file is generated.
-Logging does not send a request.
-
-For NaN/infinity or binary byte inputs, the example instead consists of
-`request.bin` (complete HTTP body, including its JSON prefix) and `request.headers`
-(the HTTP content type and JSON-prefix byte length). This uses
-[Triton's binary tensor extension](https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/protocol/extension_binary_data.html)
-without changing input values. Outputs are requested as binary in that case.
-
-Example files contain the supplied input values, just like MLflow's stored input
-example; use non-sensitive examples. The direct `triton.log_model()` API for
-pre-existing repositories does not generate requests because it takes no input example.
-
-## Inspect model architecture without loading weights
-
-PyTorch and Transformers wrappers automatically include `architecture.json` in the
-MLflow artifact and its self-contained Triton `1/artifact/` copy. Read this JSON
-without importing custom model code or loading weights. It records the model class,
-module classes, parameter/buffer shapes and dtypes (never tensor values), and relative
-paths to packaged Python and configuration files. Transformers reports component
-classes such as the tokenizer; its saved `config.json` contains model configuration.
-
-| Argument | Required | Meaning |
-| --- | --- | --- |
-| `architecture_init_kwargs` | No | JSON object documenting constructor arguments, supplied by the caller. Defaults to unknown; never guessed or passed to the constructor. |
+If you already have Triton serving files, store them in MLflow directly:
 
 ```python
-from mlflow_triton import pytorch
+from mlflow_triton import triton
 
-pytorch.log_model(
-    model,
-    input_example=example,
-    code_paths=["custom_network.py"],
-    architecture_init_kwargs={"input_size": 16, "hidden_size": 32},
+info = triton.log_model(
+    triton_model_path="/tmp/model-repository/iris_classifier",
+    name="triton-model",
+    registered_model_name="iris-serving",
 )
 ```
 
-The same optional argument is supported by `mlflow_triton.transformers.log_model`.
-Include only non-sensitive architecture settings, never credentials or training data.
-This is documentation, not an automatic reconstruction recipe: module structure
-cannot describe arbitrary `forward()` logic or preprocessing. Constructor settings
-are caller-declared and are not verified against the model. Required custom code
-must still be included using `code_paths` or installed dependencies. Existing artifacts
-are unchanged; the report is generated on subsequent logging. Serving inputs,
-outputs, weights and `config.pbtxt` are unaffected.
+| Argument | Default | Purpose |
+| --- | --- | --- |
+| `triton_model_path` | Required | One model directory with at least one positive numbered version directory. Symbolic links are rejected. |
+| `name` | `"triton-model"` | MLflow logged-model name; preserves the existing Triton directory name and configuration. |
+| `registered_model_name` | `None` | Optional Registry name. |
+| `await_registration_for` | `300` | Registration wait timeout in seconds. |
+| `run_id` | `None` | Optional MLflow run association. |
+| `metadata` | `None` | Model metadata dictionary. |
+
+Returns `ModelInfo`. This API preserves your existing files; it does not generate
+serving code, signatures or requests. It accepts only the arguments above.
+Retrieve the files with `triton.load_model(info.model_uri)` when needed.
+
+## Further documentation
+
+- [Advanced serving guide](ADVANCED.md): validation details, device behavior,
+  configuration mapping, architecture reports and resource requirements.
+- [Examples and validation](https://github.com/ai-lab-tech/mlflow-plugin/blob/main/examples/README.md).
+- [Send a generated request](https://github.com/ai-lab-tech/mlflow-plugin#send-an-example-request) after deploying your model to Triton.
+- [Optional Triton Control deployment](https://github.com/ai-lab-tech/mlflow-plugin/blob/main/packages/mlflow-triton-control/README.md).
