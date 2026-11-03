@@ -47,7 +47,9 @@ class TritonControlDeploymentClient(BaseDeploymentClient):
             )
         base_url = os.getenv("TRITON_CONTROL_URL", "").strip()
         if not base_url:
-            raise MlflowException("TRITON_CONTROL_URL is required for target triton-control")
+            raise MlflowException(
+                "TRITON_CONTROL_URL is required for target triton-control"
+            )
         try:
             parsed = urlsplit(base_url)
             parsed.port  # Validate a malformed or out-of-range port.
@@ -101,7 +103,9 @@ class TritonControlDeploymentClient(BaseDeploymentClient):
             raise MlflowException("s3_profile_id is not supported; use s3_profile_name")
         profile_name = config.get("s3_profile_name")
         if not isinstance(profile_name, str) or not profile_name.strip():
-            raise MlflowException("s3_profile_name is required and must be a non-empty string")
+            raise MlflowException(
+                "s3_profile_name is required and must be a non-empty string"
+            )
         profile_name = profile_name.strip()
         profile = self._request(
             "GET", "/api/s3-profiles/resolve", params={"name": profile_name}

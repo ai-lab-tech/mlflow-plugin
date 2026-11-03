@@ -22,10 +22,12 @@ def main():
     tests = Path(__file__).resolve().parents[1] / "tests"
     suite = unittest.TestSuite()
     for path in sorted(tests.glob("test_*.py")):
-        integration = (
-            path.name.startswith("test_deployment")
-            or path.name == "test_compatibility.py"
-        )
+        integration = path.name.startswith("test_deployment") or path.name in {
+            "test_compatibility.py",
+            "test_generated_requirements.py",
+            "test_model_uri.py",
+            "test_profile_selection.py",
+        }
         if args.package != "all" and integration != (args.package == "control"):
             continue
         suite.addTests(

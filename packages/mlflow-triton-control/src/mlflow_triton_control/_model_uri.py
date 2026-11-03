@@ -14,7 +14,6 @@ from mlflow.tracking._tracking_service.utils import get_default_host_creds
 from mlflow.utils.rest_utils import http_request
 
 
-
 @dataclass(frozen=True)
 class DeploymentArtifacts:
     repository_uri: str
@@ -25,12 +24,17 @@ def _read_requirements(repository_artifact_uri):
     """Read only the optional requirements file through MLflow artifact access."""
     try:
         entries = mlflow.artifacts.list_artifacts(artifact_uri=repository_artifact_uri)
-        entry = next((item for item in entries if Path(item.path).name == "requirements.txt"), None)
+        entry = next(
+            (item for item in entries if Path(item.path).name == "requirements.txt"),
+            None,
+        )
         if entry is None:
             return None
         limit = 1024 * 1024
         if entry.is_dir or (entry.file_size is not None and entry.file_size > limit):
-            raise MlflowException("Invalid or oversized Triton requirements.txt (maximum 1 MiB)")
+            raise MlflowException(
+                "Invalid or oversized Triton requirements.txt (maximum 1 MiB)"
+            )
         with TemporaryDirectory(prefix="triton-requirements-") as directory:
             local = mlflow.artifacts.download_artifacts(
                 artifact_uri=repository_artifact_uri.rstrip("/") + "/requirements.txt",
@@ -57,9 +61,8 @@ def _relative_path(path):
     if not isinstance(path, str) or not path or path.startswith("/"):
         raise MlflowException("Invalid relative Triton artifact path")
     decoded = unquote(path)
-    if (
-        any(part in {"", ".", ".."} for part in decoded.split("/"))
-        or any(char in decoded for char in ("\\", "?", "#", "%", "\x00"))
+    if any(part in {"", ".", ".."} for part in decoded.split("/")) or any(
+        char in decoded for char in ("\\", "?", "#", "%", "\x00")
     ):
         raise MlflowException("Invalid relative Triton artifact path")
     return path
@@ -126,7 +129,9 @@ def _resolve_model(model_uri, *, include_requirements):
         raise MlflowException("model_uri is required")
     scheme = urlsplit(model_uri).scheme
     if scheme not in {"models", "runs"}:
-        raise MlflowException("model_uri must be a models:/ or runs:/ MLflow URI; direct storage paths are not supported")
+        raise MlflowException(
+            "model_uri must be a models:/ or runs:/ MLflow URI; direct storage paths are not supported"
+        )
     try:
         artifact_uri = _artifact_uri(model_uri)
         root = _s3_location(artifact_uri)
@@ -143,10 +148,13 @@ def _resolve_model(model_uri, *, include_requirements):
             )
         model_name = flavor.get("model_name")
         if model_name is not None and data.split("/")[-1] != model_name:
-            raise MlflowException("Triton flavor model_name does not match its data path")
+            raise MlflowException(
+                "Triton flavor model_name does not match its data path"
+            )
         requirements = (
             _read_requirements(artifact_uri.rstrip("/") + "/" + data)
-            if include_requirements else None
+            if include_requirements
+            else None
         )
         return DeploymentArtifacts(root + "/" + data, requirements)
     except MlflowException:

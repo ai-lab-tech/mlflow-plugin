@@ -21,7 +21,11 @@ class DeploymentSmokeTests(unittest.TestCase):
                 return httpx.Response(200, json={"id": 7, "name": "training"})
             if request.method == "POST":
                 import json
-                self.assertEqual(json.loads(request.content)["requirements_txt"], "scikit-learn==1.7.2\n")
+
+                self.assertEqual(
+                    json.loads(request.content)["requirements_txt"],
+                    "scikit-learn==1.7.2\n",
+                )
                 return httpx.Response(200, json={"instance_id": 42})
             if request.method == "DELETE":
                 return httpx.Response(200, json={"message": "deleted"})
@@ -31,10 +35,27 @@ class DeploymentSmokeTests(unittest.TestCase):
 
         real_client = httpx.Client
         with (
-            patch("mlflow_triton_control._model_uri._artifact_uri", return_value="s3://models/repository"),
-            patch("mlflow_triton_control._model_uri.get_model_info", return_value=SimpleNamespace(flavors={"triton": {"data": "model_repository/iris"}})),
-            patch("mlflow_triton_control._model_uri._read_requirements", return_value="scikit-learn==1.7.2\n"),
-            patch.dict("os.environ", {"TRITON_CONTROL_TOKEN": "smoke-token", "TRITON_CONTROL_URL": "http://control.test:8000"}),
+            patch(
+                "mlflow_triton_control._model_uri._artifact_uri",
+                return_value="s3://models/repository",
+            ),
+            patch(
+                "mlflow_triton_control._model_uri.get_model_info",
+                return_value=SimpleNamespace(
+                    flavors={"triton": {"data": "model_repository/iris"}}
+                ),
+            ),
+            patch(
+                "mlflow_triton_control._model_uri._read_requirements",
+                return_value="scikit-learn==1.7.2\n",
+            ),
+            patch.dict(
+                "os.environ",
+                {
+                    "TRITON_CONTROL_TOKEN": "smoke-token",
+                    "TRITON_CONTROL_URL": "http://control.test:8000",
+                },
+            ),
             patch(
                 "mlflow_triton_control.deployment_client.httpx.Client",
                 side_effect=lambda **kwargs: real_client(

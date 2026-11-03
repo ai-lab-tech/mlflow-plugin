@@ -5,10 +5,9 @@ import unittest
 from pathlib import Path
 
 import mlflow
+from mlflow_triton import sklearn
 from sklearn.datasets import load_iris
 from sklearn.linear_model import LogisticRegression
-
-from mlflow_triton import sklearn
 
 
 class SmokeTests(unittest.TestCase):
