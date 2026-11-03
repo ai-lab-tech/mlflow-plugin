@@ -54,6 +54,7 @@ info = sklearn.log_model(
     input_example=example_dataframe,
 )
 print(info.model_uri)
+print(info.flavors["triton"]["data"])
 ```
 
 The model and generated Triton files are now stored in MLflow at `info.model_uri`.
@@ -61,11 +62,11 @@ Configure your MLflow tracking URI and experiment before logging if needed.
 `input_example` is required and its values are saved, so use non-sensitive inputs.
 
 See the [Python API guide](packages/mlflow-triton/README.md) for PyTorch and
-Transformers examples, arguments and optional file retrieval.
+Transformers examples, arguments and generated artifacts.
 For a runnable example that creates its own small model, install `scikit-learn`
 and run [`python examples/quickstart.py`](examples/quickstart.py) from this checkout.
 Or run the [Google Colab notebook](https://colab.research.google.com/github/ai-lab-tech/mlflow-plugin/blob/main/examples/quickstart_colab.ipynb)
-without a local installation; it includes an optional download of the serving files.
+without a local installation; it lists generated files in the MLflow artifact store.
 For installation from source, see [development setup](CONTRIBUTING.md#development-setup).
 
 ## Serving and validation
@@ -80,14 +81,16 @@ Logging checks an example prediction and tensor mappings. It does not start Trit
 or deploy a service. Install the recorded dependencies in a compatible Triton
 Python backend environment and validate serving separately.
 
-Use your deployment tooling or the optional
+Use your deployment tooling or pass `info.model_uri` to the optional
 [Triton Control integration](packages/mlflow-triton-control/README.md).
 See [validation and limitations](packages/mlflow-triton/README.md#validation-and-limitations)
 for supported inputs and model requirements.
 
 ## Send an example request
 
-First [retrieve the generated files](packages/mlflow-triton/README.md#retrieve-triton-files-optional)
+First locate the
+[generated files](packages/mlflow-triton/README.md#generated-triton-files)
+in the MLflow artifact store
 and deploy the model using your tooling or the
 [Triton Control integration](packages/mlflow-triton-control/README.md).
 Once the model is ready in Triton, run the following from the retrieved model

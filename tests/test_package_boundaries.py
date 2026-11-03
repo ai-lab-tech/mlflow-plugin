@@ -19,7 +19,7 @@ class CorePackageTests(unittest.TestCase):
         self.assertFalse(
             any("mlflow_triton_control" in str(f) for f in core.files or [])
         )
-        from mlflow_triton import pytorch, sklearn, transformers, triton
+        from mlflow_triton import pytorch, sklearn, transformers
 
-        for module in [pytorch, sklearn, transformers, triton]:
+        for module in [pytorch, sklearn, transformers]:
             self.assertTrue(callable(module.log_model))

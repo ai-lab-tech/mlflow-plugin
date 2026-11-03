@@ -170,20 +170,26 @@ recorded in `validation.json`. Test actual Triton serving and GPU execution sepa
 - Sharded/device-mapped models and tasks unsupported by MLflow's prediction
   interface need a separate adapter.
 
-## Retrieve Triton files (optional)
+## Generated Triton files
 
-Use this only when you need a local directory for inspection or deployment:
+`log_model()` stores the generated Triton directory in the MLflow artifact store
+alongside the native model. Inspect it through the MLflow artifact browser.
+
+List the generated files in the artifact store without downloading them:
 
 ```python
-from mlflow_triton import triton
+from mlflow import MlflowClient
 
-model_directory = triton.load_model(info.model_uri)
-print(model_directory / "config.pbtxt")
+triton_path = info.flavors["triton"]["data"]
+for artifact in MlflowClient().list_logged_model_artifacts(info.model_id, path=triton_path):
+    print(artifact.path, "directory" if artifact.is_dir else "file")
 ```
 
-Despite its name, `triton.load_model()` returns a `pathlib.Path`, downloading files
-as needed. It does not load model weights or load a model into a running server.
-The returned directory contains one Triton model:
+This lists the direct entries. The quickstart examples also walk subdirectories
+to show the complete generated file list. Paths are relative to the logged model;
+they are not local filesystem paths or direct S3 addresses.
+
+Generated directory layout:
 
 ```text
 <triton_model_name>/
@@ -200,33 +206,6 @@ Install the recorded dependencies in a serving environment compatible with
 Triton's Python backend. Logging stores two model copies so the Triton directory
 can be deployed independently; allow enough disk space for both and temporary files.
 MLflow's framework and `pyfunc` loaders remain usable for the logged model.
-
-## Log an existing Triton model directory
-
-If you already have Triton serving files, store them in MLflow directly:
-
-```python
-from mlflow_triton import triton
-
-info = triton.log_model(
-    triton_model_path="/tmp/model-repository/iris_classifier",
-    name="triton-model",
-    registered_model_name="iris-serving",
-)
-```
-
-| Argument | Default | Purpose |
-| --- | --- | --- |
-| `triton_model_path` | Required | One model directory with at least one positive numbered version directory. Symbolic links are rejected. |
-| `name` | `"triton-model"` | MLflow logged-model name; preserves the existing Triton directory name and configuration. |
-| `registered_model_name` | `None` | Optional Registry name. |
-| `await_registration_for` | `300` | Registration wait timeout in seconds. |
-| `run_id` | `None` | Optional MLflow run association. |
-| `metadata` | `None` | Model metadata dictionary. |
-
-Returns `ModelInfo`. This API preserves your existing files; it does not generate
-serving code, signatures or requests. It accepts only the arguments above.
-Retrieve the files with `triton.load_model(info.model_uri)` when needed.
 
 ## Further documentation
 

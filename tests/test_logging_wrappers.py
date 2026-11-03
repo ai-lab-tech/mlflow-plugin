@@ -22,7 +22,6 @@ from mlflow_triton import (
     pytorch,
     sklearn,
     transformers,
-    triton,
 )
 from mlflow_triton._architecture import validate_init_kwargs, write_architecture
 from mlflow_triton._signature import config_text, contract_from_signature, model_config
@@ -460,7 +459,10 @@ class LoggingWrapperTests(unittest.TestCase):
             self.assertEqual(
                 set(metadata.flavors), {"sklearn", "python_function", "triton"}
             )
-            repository = triton.load_model("models:/wrapped/1")
+            model_root = Path(
+                mlflow.artifacts.download_artifacts(artifact_uri="models:/wrapped/1")
+            )
+            repository = model_root / metadata.flavors["triton"]["data"]
             self.assertTrue((repository / "1/model.py").is_file())
             np.testing.assert_array_equal(
                 mlflow.pyfunc.load_model(info.model_uri).predict(self.example),
@@ -545,7 +547,7 @@ class LoggingWrapperTests(unittest.TestCase):
                 "test_generated_python_backend_executes_and_rejects_bad_requests",
                 "test_logging_wrappers.LoggingWrapperTests."
                 "test_real_log_register_and_load_keeps_both_flavors",
-                "test_smoke.SmokeTests.test_log_register_and_load_real_mlflow_model",
+                "test_smoke.SmokeTests.test_log_register_and_save_real_mlflow_model",
             ],
             cwd=Path(__file__).resolve().parent,
             capture_output=True,

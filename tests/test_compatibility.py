@@ -7,7 +7,7 @@ import unittest
 
 class CompatibilityTests(unittest.TestCase):
     def test_legacy_modules_are_core_aliases(self):
-        for name in ["sklearn", "pytorch", "transformers", "triton"]:
+        for name in ["sklearn", "pytorch", "transformers"]:
             self.assertIs(
                 importlib.import_module("mlflow_triton_control." + name),
                 importlib.import_module("mlflow_triton." + name),

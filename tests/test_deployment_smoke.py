@@ -1,6 +1,7 @@
 """Optional deployment entry-point smoke test."""
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import httpx
@@ -15,7 +16,12 @@ class DeploymentSmokeTests(unittest.TestCase):
 
         def handle(request):
             requests.append(request)
+            if request.url.path == "/api/s3-profiles/resolve":
+                self.assertEqual(request.url.params["name"], "training")
+                return httpx.Response(200, json={"id": 7, "name": "training"})
             if request.method == "POST":
+                import json
+                self.assertEqual(json.loads(request.content)["requirements_txt"], "scikit-learn==1.7.2\n")
                 return httpx.Response(200, json={"instance_id": 42})
             if request.method == "DELETE":
                 return httpx.Response(200, json={"message": "deleted"})
@@ -25,7 +31,10 @@ class DeploymentSmokeTests(unittest.TestCase):
 
         real_client = httpx.Client
         with (
-            patch.dict("os.environ", {"TRITON_CONTROL_TOKEN": "smoke-token"}),
+            patch("mlflow_triton_control._model_uri._artifact_uri", return_value="s3://models/repository"),
+            patch("mlflow_triton_control._model_uri.get_model_info", return_value=SimpleNamespace(flavors={"triton": {"data": "model_repository/iris"}})),
+            patch("mlflow_triton_control._model_uri._read_requirements", return_value="scikit-learn==1.7.2\n"),
+            patch.dict("os.environ", {"TRITON_CONTROL_TOKEN": "smoke-token", "TRITON_CONTROL_URL": "http://control.test:8000"}),
             patch(
                 "mlflow_triton_control.deployment_client.httpx.Client",
                 side_effect=lambda **kwargs: real_client(
@@ -34,11 +43,11 @@ class DeploymentSmokeTests(unittest.TestCase):
             ),
         ):
             # Act
-            client = get_deploy_client("triton-control://control.test")
+            client = get_deploy_client("triton-control")
             created = client.create_deployment(
                 "iris",
-                "s3://models/repository/iris",
-                config={"s3_profile_id": 7, "image": "triton:latest"},
+                "models:/m-123",
+                config={"s3_profile_name": "training", "image": "triton:latest"},
             )
             deployments = client.list_deployments()
             deleted = client.delete_deployment("iris")
@@ -53,6 +62,7 @@ class DeploymentSmokeTests(unittest.TestCase):
         self.assertEqual(
             [(request.method, request.url.path) for request in requests],
             [
+                ("GET", "/api/s3-profiles/resolve"),
                 ("POST", "/api/deployments"),
                 ("GET", "/api/deployments/mlflow/iris"),
                 ("GET", "/api/deployments/mlflow"),

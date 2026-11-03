@@ -8,7 +8,46 @@ Neither example requires Docker, a GPU or a running Triton server.
 | Example | How to run |
 | --- | --- |
 | [Python quick start](quickstart.py) | Install `mlflow-triton` and `scikit-learn`, then run `python examples/quickstart.py` from the repository root. |
-| [Google Colab notebook](https://colab.research.google.com/github/ai-lab-tech/mlflow-plugin/blob/main/examples/quickstart_colab.ipynb) | Run the cells in order. Includes installation and an optional download of the serving files. |
+| [Google Colab notebook](https://colab.research.google.com/github/ai-lab-tech/mlflow-plugin/blob/main/examples/quickstart_colab.ipynb) | Run the cells in order. Includes installation and lists generated artifact paths without downloading model weights. |
+
+## Deploy a logged model to Triton Control
+
+Use [deploy.py](deploy.py) in a managed code-server workspace or opted-in Argo
+deployment container with the updated integration package installed. The managed
+environment supplies backend and MLflow credentials. Existing workspaces need the
+workspace credential upgrade or recreation. Use the model URI printed by a logging
+wrapper and an S3 profile name owned by your user:
+
+```bash
+python examples/deploy.py \
+  --name iris-classifier \
+  --model-uri models:/m-your-logged-model-id \
+  --s3-profile-name workflow-training \
+  --image nvcr.io/nvidia/tritonserver:26.06-py3 \
+  --wait-timeout-seconds 600
+```
+
+The example always selects `get_deploy_client("triton-control")`. It accepts no
+target host override, profile ID, direct S3 model path or flavor argument. The
+plugin resolves the generated `model_repository/<model-name>` and passes its
+`requirements.txt` to Triton Control for installation before Triton starts. The
+serving pod must be able to download the dependencies.
+
+This uses the current source changes, not the older PyPI `0.4.1` implementation.
+Until a new release is published, install the updated source or its built wheels.
+For example, from the repository root in a Python environment:
+
+```bash
+python -m pip install ./packages/mlflow-triton ./packages/mlflow-triton-control
+```
+
+The model must already have been logged to the configured S3-backed MLflow store;
+the default Colab quickstart's local artifact files cannot be deployed remotely.
+The example creates a new deployment and does not update an existing one.
+See the [deployment arguments](../packages/mlflow-triton-control/README.md#deployment-arguments)
+for environment and storage details. Argo workflows must opt into deployment
+delegation using the documented annotations; ordinary training containers do not
+receive a deployment token.
 
 ## Saved-model serving validation
 

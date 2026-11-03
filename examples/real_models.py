@@ -217,9 +217,12 @@ def main():
             import shutil
 
             import numpy as np
-            from mlflow_triton import _runtime, triton
+            from mlflow_triton import _runtime
 
-            repository = triton.load_model(info.model_uri)
+            model_root = Path(
+                mlflow.artifacts.download_artifacts(artifact_uri=info.model_uri)
+            )
+            repository = model_root / info.flavors["triton"]["data"]
             serving = output / "serving" / name
             serving.parent.mkdir(exist_ok=True)
             shutil.copytree(repository, serving)
