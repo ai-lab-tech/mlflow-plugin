@@ -1,6 +1,6 @@
 # MLflow → Triton
 
-**Turn saved models into portable Triton serving artifacts.**
+**Log trained models to MLflow with portable Triton serving files.**
 
 [![CI](https://github.com/ai-lab-tech/mlflow-plugin/actions/workflows/mlflow-plugin-ci.yml/badge.svg)](https://github.com/ai-lab-tech/mlflow-plugin/actions/workflows/mlflow-plugin-ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -14,7 +14,7 @@
 **For data scientists: prepare models for Triton demos and hand them off to ML engineers for production optimization.**
 
 Log a fitted sklearn pipeline, a PyTorch module or a Hugging Face pipeline with
-an example request. The core package preserves the native MLflow model and adds
+an example prediction input. The core package preserves the native MLflow model and adds
 a complete Triton Python-backend model directory: configuration, serving code,
 model assets and a local validation report.
 
@@ -24,10 +24,10 @@ validate and optimize the serving implementation.
 
 ```mermaid
 flowchart LR
-    A[Saved model + example input] --> B[MLflow log wrapper]
+    A[Trained model in memory + example input] --> B[Framework log_model wrapper]
     B --> C[Native MLflow model]
     B --> D[Triton model repository]
-    D --> E[Your Triton server]
+    D -. Deploy separately .-> E[Your Triton server]
     D -. Optional deployment .-> F[Triton Control]
 ```
 
@@ -50,26 +50,30 @@ Requires Python 3.10+. To install the latest published core release from PyPI:
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade mlflow-triton
-# Install the framework/version required by your saved model separately.
+# Install the framework/version required by your model separately.
 ```
 
 With your already-fitted pipeline and a representative input DataFrame:
 
 ```python
-from mlflow_triton import sklearn, triton
+from mlflow_triton import sklearn
 
 info = sklearn.log_model(
     fitted_pipeline,
     name="classifier",
     input_example=example_dataframe,
 )
-repository = triton.load_model(info.model_uri)
-print(repository)  # Local model directory ready for your serving workflow
+print(info.model_uri)
 ```
 
-Use MLflow's normal tracking configuration to choose where artifacts are stored.
-`input_example` is required. See the [argument tables](packages/mlflow-triton/README.md#log-api-reference)
-for signatures, custom architectures, tokenizers, dependencies and GPU selection.
+The model and generated Triton serving files are now stored in MLflow at
+`info.model_uri`. No additional save or load call is needed.
+
+Configure MLflow's tracking URI and experiment before logging to choose where
+artifacts are stored. `input_example` is a required prediction input, such as a
+DataFrame; it is not a Triton HTTP request. See the
+[argument tables](packages/mlflow-triton/README.md#log-api-reference) for signatures,
+custom architectures, tokenizers, dependencies and CPU/GPU serving configuration.
 
 To install or upgrade the optional Triton Control deployment integration:
 
@@ -106,7 +110,7 @@ MLflow model artifact/
 └── model_repository/classifier/
     ├── config.pbtxt
     ├── requirements.txt
-    ├── request.json
+    ├── request.json             # Or request.bin + request.headers for binary inputs
     ├── validation.json
     └── 1/
         ├── model.py
@@ -120,6 +124,23 @@ of the saved artifact, requiring memory for another copy. Logging does **not**
 launch Triton.
 Triton execution is a separate validation step. Dependencies must be installed
 in a compatible serving environment.
+
+## Retrieve serving files locally (optional)
+
+If you need the generated files for inspection or deployment, retrieve them from
+MLflow:
+
+```python
+from mlflow_triton import triton
+
+model_directory = triton.load_model(info.model_uri)
+print(model_directory / "config.pbtxt")
+```
+
+Despite its name, `triton.load_model()` returns a local directory path, downloading
+artifacts as needed. It does not load model weights into memory or load the model
+into a running Triton server. The directory contains one model; deployment is a
+separate step using your serving tooling.
 
 ## Send an example request
 
