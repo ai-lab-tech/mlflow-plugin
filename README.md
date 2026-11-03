@@ -7,7 +7,8 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](packages/mlflow-triton/pyproject.toml)
 
 [API reference](packages/mlflow-triton/README.md#log-api-reference) ·
-[Examples](examples/README.md) ·
+[Quick starts](examples/README.md#quick-starts) ·
+[Serving validation](examples/README.md#saved-model-serving-validation) ·
 [Deployment integration](packages/mlflow-triton-control/README.md) ·
 [Contributing](CONTRIBUTING.md)
 

@@ -1,4 +1,19 @@
-# Saved-model examples: 13-case test dataset
+# Examples
+
+## Quick starts
+
+Start here to train a small classifier and log it with Triton serving files.
+Neither example requires Docker, a GPU or a running Triton server.
+
+| Example | How to run |
+| --- | --- |
+| [Python quick start](quickstart.py) | Install `mlflow-triton` and `scikit-learn`, then run `python examples/quickstart.py` from the repository root. |
+| [Google Colab notebook](https://colab.research.google.com/github/ai-lab-tech/mlflow-plugin/blob/main/examples/quickstart_colab.ipynb) | Run the cells in order. Includes installation and an optional download of the serving files. |
+
+## Saved-model serving validation
+
+Use the suite below to test existing saved models against actual Triton responses.
+It requires model fixtures and Docker for the full serving run.
 
 These examples exercise the new `sklearn.log_model`, `pytorch.log_model` and
 `transformers.log_model` wrappers with mandatory `input_example` requests.
