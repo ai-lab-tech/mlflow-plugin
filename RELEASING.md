@@ -13,7 +13,7 @@ need a version edit for each release. Update them if package names, Python
 requirements or installation steps change. Then run:
 
 ```bash
-python scripts/check_release.py --tag v0.4.2
+python scripts/check_release.py --tag v0.4.3
 python -m build packages/mlflow-triton --outdir dist/core
 python -m build packages/mlflow-triton-control --outdir dist/control
 python -m twine check --strict dist/core/* dist/control/*
