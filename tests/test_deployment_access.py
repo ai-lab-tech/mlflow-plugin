@@ -8,6 +8,27 @@ from mlflow_triton_control._deployment_access import access_payload
 
 
 class AccessTests(unittest.TestCase):
+    def test_domains_rejected_regardless_of_base_domain(self):
+        for domain in ("", "models.example.com"):
+            for host in ("model.example.com", "model.example.com.", "sub.model"):
+                with self.subTest(base_domain=domain, host=host):
+                    request = Mock(
+                        return_value={"ingress_enabled": True, "base_domain": domain}
+                    )
+                    with self.assertRaisesRegex(MlflowException, "short hostname only"):
+                        access_payload({"ingress_host": host}, request)
+                    request.assert_not_called()
+
+    def test_short_hostname_passed_without_appending_domain(self):
+        for domain in ("", "models.example.com"):
+            with self.subTest(base_domain=domain):
+                request = Mock(
+                    return_value={"ingress_enabled": True, "base_domain": domain}
+                )
+                result = access_payload({"ingress_host": " Smollm "}, request)
+                self.assertEqual(result["ingress_host"], "smollm")
+                request.assert_called_once_with("GET", "/api/deployments/policy")
+
     def test_internal_default_does_not_query_policy(self):
         # Arrange
         request = Mock()
@@ -21,7 +42,7 @@ class AccessTests(unittest.TestCase):
         # Arrange
         request = Mock(return_value={"ingress_enabled": True, "allow_http": False})
         config = {
-            "ingress_host": "model.example.com",
+            "ingress_host": "model",
             "basic_auth_enabled": "true",
             "basic_auth_username": "user",
             "basic_auth_password": "secret",
@@ -39,14 +60,14 @@ class AccessTests(unittest.TestCase):
         request = Mock(return_value={"ingress_enabled": False, "allow_http": True})
         # Act / Assert
         with self.assertRaisesRegex(MlflowException, "Ingress is disabled"):
-            access_payload({"ingress_host": "model.example.com"}, request)
+            access_payload({"ingress_host": "model"}, request)
 
     def test_http_url_is_rejected(self):
         # Arrange
         request = Mock(return_value={"ingress_enabled": True, "allow_http": False})
         # Act / Assert
         with self.assertRaisesRegex(MlflowException, "hostname only"):
-            access_payload({"ingress_host": "http://model.example.com"}, request)
+            access_payload({"ingress_host": "http://model"}, request)
 
     def test_permitted_http(self):
         # Arrange
@@ -54,7 +75,7 @@ class AccessTests(unittest.TestCase):
         # Act
         result = access_payload(
             {
-                "ingress_host": "model.example.com",
+                "ingress_host": "model",
                 "ingress_scheme": "http",
                 "basic_auth_enabled": "false",
             },
@@ -71,7 +92,7 @@ class AccessTests(unittest.TestCase):
         with self.assertRaisesRegex(MlflowException, "requires HTTPS"):
             access_payload(
                 {
-                    "ingress_host": "model.example.com",
+                    "ingress_host": "model",
                     "ingress_scheme": "http",
                     "basic_auth_enabled": True,
                     "basic_auth_username": "user",
@@ -95,7 +116,7 @@ class AccessTests(unittest.TestCase):
         with self.assertRaisesRegex(MlflowException, "both username and password"):
             access_payload(
                 {
-                    "ingress_host": "model.example.com",
+                    "ingress_host": "model",
                     "basic_auth_enabled": True,
                     "basic_auth_username": "user",
                 },
@@ -141,7 +162,7 @@ class AccessTests(unittest.TestCase):
                     config={
                         "image": "triton:latest",
                         "s3_profile_name": "training",
-                        "ingress_host": "model.test",
+                        "ingress_host": "model",
                         "basic_auth_enabled": True,
                         "basic_auth_username": "user",
                         "basic_auth_password": "secret",
@@ -152,7 +173,7 @@ class AccessTests(unittest.TestCase):
             request.call_args_list[0].args, ("GET", "/api/deployments/policy")
         )
         payload = request.call_args_list[1].kwargs["json"]
-        self.assertEqual(payload["ingress_host"], "model.test")
+        self.assertEqual(payload["ingress_host"], "model")
         self.assertEqual(payload["basic_auth_password"], "secret")
         self.assertEqual(result["external_url"], "https://model.test")
         self.assertNotIn("basic_auth_password", result)

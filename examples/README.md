@@ -129,7 +129,7 @@ build logs. This is one example request per model, not the 88-case accuracy benc
 
 The orchestration and comparisons have unit tests, including mismatched Python
 versions and failed inference. The full Docker/Triton run remains user-operated;
-this code change itself does not establish twelve successful serving results.
+unit tests do not establish successful serving results for the catalog.
 
 ## Run
 
@@ -149,7 +149,7 @@ From the plugin directory:
 python examples/real_models.py --list
 
 python examples/real_models.py \
-  --output /tmp/mlflow-real-examples-12
+  --output /tmp/mlflow-real-examples
 
 # Or select one example, with a new output directory:
 python examples/real_models.py \
@@ -178,7 +178,7 @@ validate the saved artifact on CPU, requiring memory for another model copy.
 This is not a numerical benchmark or a claim of live Triton compatibility.
 The self-authored example inputs are schema/inference probes, not accuracy tests.
 
-These twelve are coverage examples, not twelve claimed successes. In particular,
+These thirteen cases are coverage examples, not claimed successes. In particular,
 NER returns nested records in some MLflow/Transformers versions; the current
 wrapper rejects unsupported nested signatures. Such a result stays a failure;
 the example does not silently flatten, drop or stringify predictions to pass.

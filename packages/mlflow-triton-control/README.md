@@ -8,6 +8,10 @@ pip install mlflow-triton-control
 mlflow deployments help -t triton-control
 ```
 
+Run these commands in your Triton Control workspace or workflow. Connection
+and authentication are configured automatically. Use a model logged to the
+workspace's MLflow server and the name of your S3 profile.
+
 ```bash
 mlflow deployments create --target triton-control \
   --name demo --model-uri models:/m-your-logged-model-id \
@@ -101,40 +105,37 @@ same Python environment as the `mlflow` CLI.
 
 ## Argo Workflows
 
-Submit the workflow through Triton Control's authenticated Argo proxy. Mark the
-deployment template with these Workflow annotations:
+Link your S3 profile under **Workflows → Configure S3 Secrets**, then submit
+through Triton Control. Connection and authentication are configured automatically.
+
+If you have multiple linked profiles, select one in your workflow:
 
 ```yaml
 metadata:
   name: train-iris
   annotations:
-    triton-control.ai/mlflow-deploy-template: deploy
-    triton-control.ai/mlflow-deployment-name: iris-classifier
     triton-control.ai/mlflow-s3-profile-name: workflow-training
 ```
 
-The backend resolves the profile name and its linked Argo artifact repository
-for the submitting user. It sets `spec.artifactRepositoryRef` and injects
-`TRITON_CONTROL_TOKEN`, `TRITON_CONTROL_S3_PROFILE_NAME`, and
-`TRITON_CONTROL_S3_BUCKET` into the named `script` or `container` template.
-Use the name with `-C s3_profile_name="$TRITON_CONTROL_S3_PROFILE_NAME"`.
-The scoped token can resolve only that profile; it cannot list profiles or read
-their credentials. The backend keeps profile IDs internal.
-The token is valid for 60 minutes and limited
-to the specified deployment and S3 profile. The Workflow receives a five-minute
-completion TTL unless it already defines one, and the Secret receives a
-Workflow owner reference for garbage collection.
+After logging the model, deploy it from your workflow step:
 
-The opted-in Workflow must have a fixed `metadata.name` and run in the Triton
-Control namespace. Direct submissions to Argo bypass this token injection.
+```bash
+mlflow deployments create --target triton-control \
+  --name iris-classifier --model-uri "$MODEL_URI" \
+  -C s3_profile_name="$TRITON_CONTROL_S3_PROFILE_NAME" \
+  -C image=your-triton-image
+```
 
-See the [shared release process](https://github.com/ai-lab-tech/mlflow-plugin/blob/main/RELEASING.md).
+Set `MODEL_URI` to the logged model's `info.model_uri` and replace
+`your-triton-image` with your serving image.
 
 ### External model endpoints
 
 The default is cluster-only access. External access uses the same REST API and
 administrator policy as Triton Control's deployment UI. The plugin reads
 `GET /api/deployments/policy` before creating an Ingress deployment.
+The example below uses the short hostname `iris`. When a base domain is
+configured, the backend appends it; read the full URL from the returned record.
 
 ```python
 deployment = client.create_deployment(
@@ -144,7 +145,7 @@ deployment = client.create_deployment(
         "s3_profile_name": "training",
         "image": "your-triton-image",
         "access_mode": "ingress",
-        "ingress_host": "iris.example.com",
+        "ingress_host": "iris",
         "ingress_scheme": "https",
     },
 )
@@ -154,7 +155,7 @@ print(deployment["external_url"])
 | Config key | Default | Meaning |
 |---|---|---|
 | `access_mode` | `internal`; inferred as `ingress` when a host is supplied | `internal` or `ingress` |
-| `ingress_host` | unset | Hostname only, e.g. `smollm`; no protocol, port or path |
+| `ingress_host` | unset | Short hostname only, e.g. `smollm`; no domain, protocol, port or path |
 | `ingress_scheme` | `https` | `https` or `http`, separate from the hostname |
 | `basic_auth_enabled` | `false` | Boolean or CLI string `true` / `false` |
 | `basic_auth_username` | unset | Required when basic authentication is enabled |
@@ -175,8 +176,9 @@ compatibility and add `internal_url`, `external_url`, `access` and
 Kubernetes exposure cannot be read, `access_error` explains that the external
 URL is unknown; readiness still uses the internal connection.
 
-When the administrator configures `tritonDeployments.baseDomain`, supply only
-the short hostname (for example, `ingress_host="smollm"`). The REST API appends
-the configured domain for the Ingress and certificate, and `external_url` in
+Always supply only the short hostname (for example, `ingress_host="smollm"`).
+Domains are administrator-managed through `tritonDeployments.baseDomain`.
+The REST API appends the configured domain for the Ingress and certificate, and `external_url` in
 deployment lookups contains the full endpoint. The plugin never appends the
-domain itself. With an empty base domain, standalone hostnames are preserved.
+domain itself. Full domains are rejected even when the base domain is empty;
+with an empty base domain, the short hostname is used unchanged.

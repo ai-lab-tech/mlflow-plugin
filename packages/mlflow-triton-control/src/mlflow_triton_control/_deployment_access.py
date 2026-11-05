@@ -33,6 +33,10 @@ def access_payload(config, request):
         return {"access_mode": "internal"}
     scheme = config.get("ingress_scheme") or "https"
     host = host.lower().rstrip(".")
+    if "." in host:
+        raise MlflowException(
+            "Enter a short hostname only, without a domain, protocol, port or path"
+        )
     if (
         not host
         or len(host) > 253
@@ -53,10 +57,6 @@ def access_payload(config, request):
             "Enable basic authentication before supplying credentials"
         )
     policy = request("GET", "/api/deployments/policy")
-    if policy.get("base_domain") and "." in host:
-        raise MlflowException(
-            "Enter only the short hostname; the configured base domain is appended automatically"
-        )
     if policy.get("ingress_enabled") is not True:
         raise MlflowException("Model Ingress is disabled by the administrator")
     if scheme == "http" and policy.get("allow_http") is not True:
