@@ -92,7 +92,8 @@ class TritonControlDeploymentClient(BaseDeploymentClient):
                 if isinstance(detail, list):
                     detail = "; ".join(
                         str(item.get("msg", "Invalid request"))
-                        for item in detail if isinstance(item, dict)
+                        for item in detail
+                        if isinstance(item, dict)
                     )
             except (ValueError, AttributeError):
                 detail = "Request failed"

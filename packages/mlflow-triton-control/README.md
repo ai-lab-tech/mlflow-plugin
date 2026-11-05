@@ -138,7 +138,8 @@ administrator policy as Triton Control's deployment UI. The plugin reads
 
 ```python
 deployment = client.create_deployment(
-    "iris", model_uri="models:/your-model-id",
+    "iris",
+    model_uri="models:/your-model-id",
     config={
         "s3_profile_name": "training",
         "image": "your-triton-image",

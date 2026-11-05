@@ -20,8 +20,12 @@ class AccessTests(unittest.TestCase):
     def test_https_and_cli_auth_fields(self):
         # Arrange
         request = Mock(return_value={"ingress_enabled": True, "allow_http": False})
-        config = {"ingress_host": "model.example.com", "basic_auth_enabled": "true",
-                  "basic_auth_username": "user", "basic_auth_password": "secret"}
+        config = {
+            "ingress_host": "model.example.com",
+            "basic_auth_enabled": "true",
+            "basic_auth_username": "user",
+            "basic_auth_password": "secret",
+        }
         # Act
         result = access_payload(config, request)
         # Assert
@@ -48,7 +52,14 @@ class AccessTests(unittest.TestCase):
         # Arrange
         request = Mock(return_value={"ingress_enabled": True, "allow_http": True})
         # Act
-        result = access_payload({"ingress_host": "model.example.com", "ingress_scheme": "http", "basic_auth_enabled": "false"}, request)
+        result = access_payload(
+            {
+                "ingress_host": "model.example.com",
+                "ingress_scheme": "http",
+                "basic_auth_enabled": "false",
+            },
+            request,
+        )
         # Assert
         self.assertEqual(result["ingress_scheme"], "http")
         self.assertFalse(result["basic_auth_enabled"])
@@ -58,8 +69,16 @@ class AccessTests(unittest.TestCase):
         request = Mock()
         # Act / Assert
         with self.assertRaisesRegex(MlflowException, "requires HTTPS"):
-            access_payload({"ingress_host": "model.example.com", "ingress_scheme": "http", "basic_auth_enabled": True,
-                            "basic_auth_username": "user", "basic_auth_password": "secret"}, request)
+            access_payload(
+                {
+                    "ingress_host": "model.example.com",
+                    "ingress_scheme": "http",
+                    "basic_auth_enabled": True,
+                    "basic_auth_username": "user",
+                    "basic_auth_password": "secret",
+                },
+                request,
+            )
         request.assert_not_called()
 
     def test_class_cannot_be_overridden(self):
@@ -74,8 +93,14 @@ class AccessTests(unittest.TestCase):
         request = Mock()
         # Act / Assert
         with self.assertRaisesRegex(MlflowException, "both username and password"):
-            access_payload({"ingress_host": "model.example.com", "basic_auth_enabled": True,
-                            "basic_auth_username": "user"}, request)
+            access_payload(
+                {
+                    "ingress_host": "model.example.com",
+                    "basic_auth_enabled": True,
+                    "basic_auth_username": "user",
+                },
+                request,
+            )
 
     def test_create_forwards_exposure_after_policy_check(self):
         # Arrange
@@ -85,27 +110,47 @@ class AccessTests(unittest.TestCase):
         from mlflow_triton_control.deployment_client import (
             TritonControlDeploymentClient,
         )
+
         with (
             patch.dict("os.environ", {"TRITON_CONTROL_URL": "https://control.test"}),
-            patch("mlflow_triton_control.deployment_client.resolve_deployment_artifacts",
-                  return_value=SimpleNamespace(repository_uri="s3://models/repository/classifier", requirements_txt=None)),
+            patch(
+                "mlflow_triton_control.deployment_client.resolve_deployment_artifacts",
+                return_value=SimpleNamespace(
+                    repository_uri="s3://models/repository/classifier",
+                    requirements_txt=None,
+                ),
+            ),
         ):
             client = TritonControlDeploymentClient("triton-control")
             with (
                 patch.object(client, "_resolve_s3_profile", return_value=1),
-                patch.object(client, "_request", side_effect=[
-                    {"ingress_enabled": True, "allow_http": False},
-                    {"instance_id": 1},
-                    {"status": "ready", "external_url": "https://model.test"},
-                ]) as request,
+                patch.object(
+                    client,
+                    "_request",
+                    side_effect=[
+                        {"ingress_enabled": True, "allow_http": False},
+                        {"instance_id": 1},
+                        {"status": "ready", "external_url": "https://model.test"},
+                    ],
+                ) as request,
             ):
                 # Act
-                result = client.create_deployment("model", "models:/model-id", config={
-                    "image": "triton:latest", "s3_profile_name": "training", "ingress_host": "model.test",
-                    "basic_auth_enabled": True, "basic_auth_username": "user", "basic_auth_password": "secret",
-                })
+                result = client.create_deployment(
+                    "model",
+                    "models:/model-id",
+                    config={
+                        "image": "triton:latest",
+                        "s3_profile_name": "training",
+                        "ingress_host": "model.test",
+                        "basic_auth_enabled": True,
+                        "basic_auth_username": "user",
+                        "basic_auth_password": "secret",
+                    },
+                )
         # Assert
-        self.assertEqual(request.call_args_list[0].args, ("GET", "/api/deployments/policy"))
+        self.assertEqual(
+            request.call_args_list[0].args, ("GET", "/api/deployments/policy")
+        )
         payload = request.call_args_list[1].kwargs["json"]
         self.assertEqual(payload["ingress_host"], "model.test")
         self.assertEqual(payload["basic_auth_password"], "secret")
