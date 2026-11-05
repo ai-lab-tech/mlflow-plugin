@@ -3,6 +3,8 @@
 Optional MLflow deployment integration for Triton Control. Installing this package
 automatically installs the matching `mlflow-triton` core release.
 
+Install in the same Python environment as your `mlflow` command.
+
 ```bash
 pip install mlflow-triton-control
 mlflow deployments help -t triton-control
@@ -30,6 +32,8 @@ deployment = client.create_deployment(
         "s3_profile_name": "workflow-training",
         "image": "your-triton-image",
         "wait_timeout_seconds": 600,
+        # Optional external HTTPS endpoint:
+        # "ingress_host": "iris",
     },
 )
 ```
@@ -40,7 +44,7 @@ The MLflow CLI and Python client use the same deployment implementation.
 
 | CLI argument | Python argument | Required / default | Meaning |
 | --- | --- | --- | --- |
-| `--target`, `-t` | `get_deploy_client(target_uri)` | Required | Plugin address for Plugin selection. |
+| `--target`, `-t` | `get_deploy_client(target_uri)` | Required | Use `triton-control`. |
 | `--name` | `name` | Required | New deployment name: 1–63 lowercase letters, digits or hyphens. Must start and end with a letter or digit. Example: `iris-classifier`.|
 | `--model-uri` | `model_uri` | Required | MLflow model reference. |
 | Repeated `-C key=value` | `config` | Required configuration | Deployment settings described in the next table. |
@@ -52,8 +56,16 @@ The MLflow CLI and Python client use the same deployment implementation.
 | `s3_profile_name` | Required | Non-empty string | Exact name of a profile owned by the authenticated caller. |
 | `image` | Required | Non-empty container image reference | Triton serving image |
 | `wait_timeout_seconds` | Optional / `300` | Finite positive number of seconds | How long to poll for readiness after the create request succeeds. The client checks approximately every three seconds and raises `MlflowException` on timeout. A timeout does not delete the deployment. |
+| `access_mode` | Optional / `internal`; `ingress` when a host is supplied | `internal` or `ingress` | Internal or external access. |
+| `ingress_host` | Optional / unset | Short hostname, e.g. `iris` | External endpoint name. No domain, protocol, port or path; Triton Control adds the configured domain. |
+| `ingress_scheme` | Optional / `https` | `https` or `http` | HTTP requires administrator permission. |
+| `basic_auth_enabled` | Optional / `false` | Boolean or CLI string `true` / `false` | Enable basic authentication; requires HTTPS. |
+| `basic_auth_username` | Required with basic authentication | String | Endpoint username. |
+| `basic_auth_password` | Required with basic authentication | String | Endpoint password; supply from your secret store. |
 
- The requirements file for serving is read automatically from the artifact.
+The requirements file for serving is read automatically from the artifact.
+Deployments are internal by default. External URLs are returned in
+`deployment["external_url"]`. To change access later, use **Endpoints** in Triton Control.
 
 
 ## Model URI and artifact storage
@@ -78,30 +90,6 @@ Supported model references:
 
 `update_deployment()`, `predict()` and `run_local()` are not supported and raise
 `MlflowException`. Send inference requests to the deployed Triton server directly.
-
-## Compatibility
-
-Existing imports such as `from mlflow_triton_control import sklearn` still
-work when this integration is installed. These are aliases to the core modules.
-
-## How MLflow finds the plugin
-
-`mlflow deployments create` is a command provided by MLflow. This package
-registers the deployment target through its Python package metadata:
-
-```toml
-[project.entry-points."mlflow.deployments"]
-triton-control = "mlflow_triton_control.deployment_client"
-```
-
-For `--target triton-control`, MLflow looks up the
-`triton-control` entry point among installed packages, loads this module, and
-calls `TritonControlDeploymentClient.create_deployment()`. That class inherits
-from MLflow's `BaseDeploymentClient` and sends the deployment request to the
-Triton Control API. MLflow reads entry-point metadata; it does not search
-through every package's source files. The package must be installed in the
-same Python environment as the `mlflow` CLI.
-
 
 ## Argo Workflows
 
@@ -128,57 +116,3 @@ mlflow deployments create --target triton-control \
 
 Set `MODEL_URI` to the logged model's `info.model_uri` and replace
 `your-triton-image` with your serving image.
-
-### External model endpoints
-
-The default is cluster-only access. External access uses the same REST API and
-administrator policy as Triton Control's deployment UI. The plugin reads
-`GET /api/deployments/policy` before creating an Ingress deployment.
-The example below uses the short hostname `iris`. When a base domain is
-configured, the backend appends it; read the full URL from the returned record.
-
-```python
-deployment = client.create_deployment(
-    "iris",
-    model_uri="models:/your-model-id",
-    config={
-        "s3_profile_name": "training",
-        "image": "your-triton-image",
-        "access_mode": "ingress",
-        "ingress_host": "iris",
-        "ingress_scheme": "https",
-    },
-)
-print(deployment["external_url"])
-```
-
-| Config key | Default | Meaning |
-|---|---|---|
-| `access_mode` | `internal`; inferred as `ingress` when a host is supplied | `internal` or `ingress` |
-| `ingress_host` | unset | Short hostname only, e.g. `smollm`; no domain, protocol, port or path |
-| `ingress_scheme` | `https` | `https` or `http`, separate from the hostname |
-| `basic_auth_enabled` | `false` | Boolean or CLI string `true` / `false` |
-| `basic_auth_username` | unset | Required when basic authentication is enabled |
-| `basic_auth_password` | unset | Required when basic authentication is enabled; write-only |
-
-HTTP requires administrator permission. Basic authentication requires HTTPS.
-Pass passwords through your application's secret handling, not literal shell
-arguments or committed configuration. Controller class and certificate issuer
-are administrator-managed; `ingress_class_name` is rejected.
-
-The backend checks policy again on creation. Existing endpoints are not removed
-when an administrator disables Ingress. Update access through Triton Control's
-**Endpoints** tab; MLflow `update_deployment` remains unsupported.
-
-Deployment lookup results preserve `url` as the internal connection for
-compatibility and add `internal_url`, `external_url`, `access` and
-`access_error`. `external_url` is null for cluster-only access. If live
-Kubernetes exposure cannot be read, `access_error` explains that the external
-URL is unknown; readiness still uses the internal connection.
-
-Always supply only the short hostname (for example, `ingress_host="smollm"`).
-Domains are administrator-managed through `tritonDeployments.baseDomain`.
-The REST API appends the configured domain for the Ingress and certificate, and `external_url` in
-deployment lookups contains the full endpoint. The plugin never appends the
-domain itself. Full domains are rejected even when the base domain is empty;
-with an empty base domain, the short hostname is used unchanged.
