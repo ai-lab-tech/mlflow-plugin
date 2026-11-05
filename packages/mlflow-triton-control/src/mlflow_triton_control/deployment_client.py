@@ -12,6 +12,7 @@ import httpx
 from mlflow.deployments import BaseDeploymentClient
 from mlflow.exceptions import MlflowException
 
+from ._deployment_access import access_payload
 from ._model_uri import resolve_deployment_artifacts
 
 _NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
@@ -88,6 +89,11 @@ class TritonControlDeploymentClient(BaseDeploymentClient):
         except httpx.HTTPStatusError as exc:
             try:
                 detail = exc.response.json().get("detail", "Request failed")
+                if isinstance(detail, list):
+                    detail = "; ".join(
+                        str(item.get("msg", "Invalid request"))
+                        for item in detail if isinstance(item, dict)
+                    )
             except (ValueError, AttributeError):
                 detail = "Request failed"
             raise MlflowException(
@@ -142,6 +148,7 @@ class TritonControlDeploymentClient(BaseDeploymentClient):
             ) from exc
         if not math.isfinite(timeout) or timeout <= 0:
             raise MlflowException("wait_timeout_seconds must be a positive number")
+        exposure = access_payload(config, self._request)
         profile_id = self._resolve_s3_profile(config)
         artifacts = resolve_deployment_artifacts(model_uri)
         repository_uri = artifacts.repository_uri
@@ -169,6 +176,7 @@ class TritonControlDeploymentClient(BaseDeploymentClient):
             "image": image,
             "model_control_mode": "explicit",
         }
+        payload.update(exposure)
         if artifacts.requirements_txt is not None:
             payload["requirements_txt"] = artifacts.requirements_txt
         result = self._request("POST", "/api/deployments", json=payload)

@@ -129,3 +129,53 @@ The opted-in Workflow must have a fixed `metadata.name` and run in the Triton
 Control namespace. Direct submissions to Argo bypass this token injection.
 
 See the [shared release process](https://github.com/ai-lab-tech/mlflow-plugin/blob/main/RELEASING.md).
+
+### External model endpoints
+
+The default is cluster-only access. External access uses the same REST API and
+administrator policy as Triton Control's deployment UI. The plugin reads
+`GET /api/deployments/policy` before creating an Ingress deployment.
+
+```python
+deployment = client.create_deployment(
+    "iris", model_uri="models:/your-model-id",
+    config={
+        "s3_profile_name": "training",
+        "image": "your-triton-image",
+        "access_mode": "ingress",
+        "ingress_host": "iris.example.com",
+        "ingress_scheme": "https",
+    },
+)
+print(deployment["external_url"])
+```
+
+| Config key | Default | Meaning |
+|---|---|---|
+| `access_mode` | `internal`; inferred as `ingress` when a host is supplied | `internal` or `ingress` |
+| `ingress_host` | unset | Hostname only, e.g. `smollm`; no protocol, port or path |
+| `ingress_scheme` | `https` | `https` or `http`, separate from the hostname |
+| `basic_auth_enabled` | `false` | Boolean or CLI string `true` / `false` |
+| `basic_auth_username` | unset | Required when basic authentication is enabled |
+| `basic_auth_password` | unset | Required when basic authentication is enabled; write-only |
+
+HTTP requires administrator permission. Basic authentication requires HTTPS.
+Pass passwords through your application's secret handling, not literal shell
+arguments or committed configuration. Controller class and certificate issuer
+are administrator-managed; `ingress_class_name` is rejected.
+
+The backend checks policy again on creation. Existing endpoints are not removed
+when an administrator disables Ingress. Update access through Triton Control's
+**Endpoints** tab; MLflow `update_deployment` remains unsupported.
+
+Deployment lookup results preserve `url` as the internal connection for
+compatibility and add `internal_url`, `external_url`, `access` and
+`access_error`. `external_url` is null for cluster-only access. If live
+Kubernetes exposure cannot be read, `access_error` explains that the external
+URL is unknown; readiness still uses the internal connection.
+
+When the administrator configures `tritonDeployments.baseDomain`, supply only
+the short hostname (for example, `ingress_host="smollm"`). The REST API appends
+the configured domain for the Ingress and certificate, and `external_url` in
+deployment lookups contains the full endpoint. The plugin never appends the
+domain itself. With an empty base domain, standalone hostnames are preserved.
