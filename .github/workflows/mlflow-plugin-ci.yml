@@ -25,10 +25,10 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
-          python scripts/check_release.py
           if [ -n "$RELEASE_TAG" ]; then
-            python scripts/check_release.py --tag "$RELEASE_TAG"
+            python scripts/check_release.py --tag "$RELEASE_TAG" --write-version
           fi
+          python scripts/check_release.py
           ruff check packages tests scripts
           ruff format --check packages tests scripts
       - name: Build distributions

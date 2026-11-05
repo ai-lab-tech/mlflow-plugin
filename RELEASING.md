@@ -6,14 +6,17 @@ exact matching core version; existing Control logging imports forward to core.
 
 ## Prepare
 
-Use Python 3.11+ for release tooling. Update `VERSION`, both package
-`pyproject.toml` versions and the Control dependency `mlflow-triton==X.Y.Z`.
+Push a new `vX.Y.Z` tag to release both packages. CI takes the version from the
+tag and updates `VERSION`, both package versions, and the exact Control dependency
+in its build checkout automatically. No manual version edits are needed.
+
+Use Python 3.11+ to optionally build and verify a release locally.
 The README installation commands use the latest published version and do not
 need a version edit for each release. Update them if package names, Python
 requirements or installation steps change. Then run:
 
 ```bash
-python scripts/check_release.py --tag v0.4.3
+python scripts/check_release.py --tag v0.4.4 --write-version
 python -m build packages/mlflow-triton --outdir dist/core
 python -m build packages/mlflow-triton-control --outdir dist/control
 python -m twine check --strict dist/core/* dist/control/*
@@ -36,8 +39,16 @@ names and configure separate Trusted Publishers for `mlflow-triton` and
 `mlflow-plugin-ci.yml`, environments `pypi-core` and `pypi-control` respectively.
 Create those GitHub environments and configure any desired approval rules.
 
-After review, commit the release and push a matching `vX.Y.Z` tag. CI checks the
-shared version, builds both wheels and source distributions, and tests MLflow
+After review, push a new tag on the commit to release, for example:
+
+```bash
+git tag v0.4.4
+git push origin v0.4.4
+```
+
+The tagged commit must include the automatic version preparation workflow.
+CI sets the shared version from the tag, builds both wheels and source
+distributions, and tests MLflow
 3.14.0 plus the latest supported 3.x release. Only tag pushes publish; core is
 published before Control. Branch/PR/scheduled runs never publish. Each package
 has its own README as its PyPI description. After both publications succeed, CI
@@ -55,7 +66,7 @@ instructions available for unreleased changes.
 
 If core publishes but Control fails, fix the external publishing problem and
 rerun failed jobs. Do not replace an already published version. Code fixes require
-a new shared version and tag. Creating these files does not publish a release or
+a new tag. Creating these files does not publish a release or
 configure the external Trusted Publishers.
 
 ## Public repository preparation
