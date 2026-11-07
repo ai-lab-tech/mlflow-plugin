@@ -126,31 +126,12 @@ When `registered_model_name` is supplied, logging compares the generated
 - Changed configuration: create a fresh Triton repository starting at `1/`.
 - No previous version, or a previous model without the Triton flavor: start at `1/`.
 
-Only `config.pbtxt` determines compatibility. Whitespace and protobuf comments
-are ignored; configuration values and field order are compared. Weights,
-backend code, and requirements are not compared. The `version` embedded inside
-`mlflow_contract` describes the contract format and is compared like any other
-value; it is not the numeric model directory version. The shared config remains
-unchanged as version directories are added. Triton's default policy serves the
-highest numeric version after the repository is loaded.
+Each call with `registered_model_name` creates a new MLflow Registry version;
+its Triton directory number follows the rules above. Without registration,
+the Triton directory starts at `1/`.
 
-Every call still creates a new MLflow Registry version. Each artifact contains
-an independent snapshot: earlier artifacts are never modified. For example,
-Registry versions 1 and 2 can contain Triton directories `1/` and `1/, 2/`;
-Registry version 3 with a changed config starts a separate snapshot at `1/`.
-The Triton flavor in `MLmodel` records `model_version`, `repository_group`, and,
-for compatible updates, `previous_model_uri`.
-
-Without `registered_model_name`, logging starts at `1/` and does not look up
-history. Access failures for existing history fail logging instead of silently
-starting over. The latest Registry version must be `READY`; pending or failed
-registration blocks the update. Matching repositories must contain complete
-numeric versions with `model.py` and `artifact/MLmodel`, and no symbolic links.
-Copying history increases artifact storage and logging time.
-Calls for the same registered name must run sequentially to maintain a linear
-history; concurrent calls can create independent snapshots from the same parent.
-All included versions must work with the new snapshot's serving requirements,
-because dependency changes intentionally do not affect compatibility.
+See [model version updates](ADVANCED.md#model-version-updates) for the activity
+diagram, configuration comparison, stored metadata, and concurrency details.
 
 ### Model saving options
 
