@@ -2,6 +2,12 @@ name: MLflow packages CI
 
 on:
   workflow_dispatch:
+    inputs:
+      mlflow_version:
+        description: "MLflow version to test (e.g. 3.17.2 or latest); leave empty for the standard matrix"
+        required: false
+        type: string
+        default: ""
   schedule:
     - cron: "0 6 * * 1"
   push:
@@ -15,12 +21,39 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      mlflow_versions: ${{ steps.mlflow-matrix.outputs.versions }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: python -m pip install build ruff twine
+      - name: Select MLflow versions
+        id: mlflow-matrix
+        env:
+          REQUESTED_MLFLOW_VERSION: ${{ inputs.mlflow_version }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from packaging.specifiers import SpecifierSet
+          from packaging.version import InvalidVersion, Version
+
+          requested = os.environ.get("REQUESTED_MLFLOW_VERSION", "").strip()
+          if requested and requested != "latest":
+              try:
+                  version = Version(requested)
+              except InvalidVersion:
+                  raise SystemExit("Enter an exact MLflow version or 'latest'.") from None
+              if not SpecifierSet(">=3.14,<4").contains(version, prereleases=True):
+                  raise SystemExit("The packages currently require MLflow >=3.14,<4.")
+              requested = str(version)
+          versions = [requested] if requested else ["3.14.0", "latest"]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print("versions=" + json.dumps(versions), file=output)
+          print("Testing MLflow: " + ", ".join(versions))
+          PY
       - name: Check versions and formatting
         env:
           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
@@ -29,8 +62,8 @@ jobs:
             python scripts/check_release.py --tag "$RELEASE_TAG" --write-version
           fi
           python scripts/check_release.py
-          ruff check packages tests scripts examples/smoke_versioning.py examples/serving_validation.py
-          ruff format --check packages tests scripts examples/smoke_versioning.py examples/serving_validation.py
+          ruff check packages tests scripts examples/smoke_versioning.py examples/smoke_core_server.py examples/serving_validation.py
+          ruff format --check packages tests scripts examples/smoke_versioning.py examples/smoke_core_server.py examples/serving_validation.py
       - name: Build distributions
         run: |
           python -m build packages/mlflow-triton --outdir dist/core
@@ -48,7 +81,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mlflow: ["3.14.0", "latest"]
+        mlflow: ${{ fromJSON(needs.build.outputs.mlflow_versions) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -88,7 +121,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mlflow: ["3.14.0", "latest"]
+        mlflow: ${{ fromJSON(needs.build.outputs.mlflow_versions) }}
     env:
       MLFLOW_DISABLE_AGENT_HINT: "1"
     steps:
@@ -127,6 +160,56 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+  core-server-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        mlflow: ${{ fromJSON(needs.build.outputs.mlflow_versions) }}
+    env:
+      MLFLOW_DISABLE_AGENT_HINT: "1"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - name: Install built core and CPU framework dependencies
+        env:
+          MLFLOW_VERSION: ${{ matrix.mlflow }}
+        run: |
+          python -m pip install "torch==2.9.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "transformers==4.57.1"
+          if [ "$MLFLOW_VERSION" = latest ]; then
+            python -m pip install dist/core/*.whl "mlflow>=3.14,<4"
+          else
+            python -m pip install dist/core/*.whl "mlflow==$MLFLOW_VERSION"
+          fi
+          python -m pip check
+      - name: Exercise all core wrappers against a real MLflow HTTP server
+        shell: bash
+        run: |
+          set -o pipefail
+          python examples/smoke_core_server.py --framework all --output "$RUNNER_TEMP/core-server-smoke" \
+            2>&1 | tee "$RUNNER_TEMP/core-server-smoke.log"
+      - name: Upload server logs, report, registry, and model artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-server-smoke-mlflow-${{ matrix.mlflow }}
+          path: |
+            ${{ runner.temp }}/core-server-smoke/
+            ${{ runner.temp }}/core-server-smoke.log
+          retention-days: 7
+          if-no-files-found: warn
+
   public-data:
     runs-on: ubuntu-latest
     steps:
@@ -145,7 +228,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mlflow: ["3.14.0", "latest"]
+        mlflow: ${{ fromJSON(needs.build.outputs.mlflow_versions) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -176,7 +259,7 @@ jobs:
 
   publish-core:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [build, test, versioning-smoke, framework-tests, public-data]
+    needs: [build, test, versioning-smoke, core-server-smoke, framework-tests, public-data]
     runs-on: ubuntu-latest
     environment: pypi-core
     permissions:
