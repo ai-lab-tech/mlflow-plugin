@@ -85,30 +85,63 @@ def comparison_result(actual, expected, specs):
     return report
 
 
-def read_model_contract(model_directory):
-    """Read the generated config using Triton's protobuf schema (test tooling only)."""
+def latest_model_version(model_directory):
+    """Select the numeric version served by the generated default latest policy."""
+    versions = [
+        path
+        for path in Path(model_directory).iterdir()
+        if path.is_dir()
+        and path.name.isascii()
+        and path.name.isdecimal()
+        and int(path.name) > 0
+        and str(int(path.name)) == path.name
+    ]
+    if not versions:
+        raise ValueError("No numeric Triton model versions found")
+    return max(versions, key=lambda path: int(path.name))
+
+
+def _load_tensor_mapping(version):
     import importlib.util
 
+    spec = importlib.util.spec_from_file_location(
+        "tensor_mapping", version / "model.py"
+    )
+    mapping = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mapping)
+    return mapping
+
+
+def read_model_contract(model_directory):
+    """Read the generated config using Triton's protobuf schema (test tooling only)."""
     from google.protobuf import json_format, text_format
     from tritonclient.grpc import model_config_pb2
 
     root = Path(model_directory)
     config = model_config_pb2.ModelConfig()
     text_format.Parse((root / "config.pbtxt").read_text(), config)
-    spec = importlib.util.spec_from_file_location("tensor_mapping", root / "1/model.py")
-    mapping = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mapping)
+    mapping = _load_tensor_mapping(latest_model_version(root))
     return mapping.contract_from_config(
         json_format.MessageToDict(config, preserving_proto_field_name=True)
     )
 
 
+def native_prediction(model_directory, inputs, contract):
+    """Predict with the latest artifact and its own tensor adapter."""
+    import mlflow.pyfunc
+
+    version = latest_model_version(model_directory)
+    mapping = _load_tensor_mapping(version)
+    model = mlflow.pyfunc.load_model(str(version / "artifact"))
+    return mapping.encode_outputs(
+        model.predict(mapping.decode_inputs(inputs, contract)), contract
+    )
+
+
 def native_gpu_reference(contract_path=None):
     """Independent native MLflow prediction in its own process, before Triton starts."""
-    import importlib.util
     import os
 
-    import mlflow.pyfunc
     import numpy as np
 
     contract = (
@@ -116,10 +149,6 @@ def native_gpu_reference(contract_path=None):
         if contract_path is not None
         else read_model_contract("/model")
     )
-    # Reuse schema conversion only. Do not instantiate TritonPythonModel or execute().
-    spec = importlib.util.spec_from_file_location("tensor_mapping", "/model/1/model.py")
-    mapping = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mapping)
     with np.load("/fixture.npz", allow_pickle=False) as fixture:
         inputs = {k[6:]: fixture[k] for k in fixture.files if k.startswith("input:")}
         cpu = {k[7:]: fixture[k] for k in fixture.files if k.startswith("output:")}
@@ -130,10 +159,8 @@ def native_gpu_reference(contract_path=None):
         "0" if contract["flavor"] == "transformers" else "cuda:0"
     )
     os.environ["MLFLOW_HUGGINGFACE_USE_DEVICE_MAP"] = "false"
-    model = mlflow.pyfunc.load_model("/model/1/artifact")
-    predicted = mapping.encode_outputs(
-        model.predict(mapping.decode_inputs(inputs, contract)), contract
-    )
+    # Reuse schema conversion only. Do not instantiate TritonPythonModel or execute().
+    predicted = native_prediction("/model", inputs, contract)
     saved = {}
     for name, value in predicted.items():
         if value.dtype == object:
@@ -334,7 +361,8 @@ def validate_serving(row, image, python_version, requirements, directory, option
                 "--shm-size",
                 "1g",
                 "-e",
-                "PYTHONPATH=" + (model_site if requirements_only else "/tmp/model-deps"),
+                "PYTHONPATH="
+                + (model_site if requirements_only else "/tmp/model-deps"),
                 "-e",
                 "PYTHONNOUSERSITE=1",
                 "-e",
@@ -649,7 +677,9 @@ def validate_serving(row, image, python_version, requirements, directory, option
                             30,
                         )
                     except Exception as error:
-                        result.setdefault("dependency_audit_errors", []).append(str(error))
+                        result.setdefault("dependency_audit_errors", []).append(
+                            str(error)
+                        )
                         result["triton_validation"] = "failed"
             try:
                 subprocess.run(
