@@ -9,6 +9,12 @@ Neither example requires Docker, a GPU or a running Triton server.
 | --- | --- |
 | [Python quick start](quickstart.py) | Install `mlflow-triton` and `scikit-learn`, then run `python examples/quickstart.py` from the repository root. |
 | [Google Colab notebook](https://colab.research.google.com/github/ai-lab-tech/mlflow-plugin/blob/main/examples/quickstart_colab.ipynb) | Run the cells in order. Includes installation and lists generated artifact paths without downloading model weights. |
+| [Registry versioning smoke test](smoke_versioning.py) | Run `python examples/smoke_versioning.py --output /tmp/triton-versioning-smoke` with a new output directory. Trains three Iris classifiers, checks compatible and incompatible updates in a real local MLflow registry, and retains the database, artifacts, and `report.json`. |
+
+The `versioning-smoke` job in GitHub Actions runs this check against MLflow
+3.14.0 and the latest supported release using the built core wheel. Each run
+uploads the report, SQLite registry, model artifacts, and log for seven days,
+including partial output on failure. This check must pass before publishing.
 
 ## Saved-model serving validation
 

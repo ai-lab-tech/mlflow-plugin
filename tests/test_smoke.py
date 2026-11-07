@@ -1,5 +1,8 @@
 """Core installed-package logging smoke test."""
 
+import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +14,26 @@ from sklearn.linear_model import LogisticRegression
 
 
 class SmokeTests(unittest.TestCase):
+    def test_real_trained_models_compatible_and_incompatible_versions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "smoke"
+            example = (
+                Path(__file__).resolve().parents[1] / "examples/smoke_versioning.py"
+            )
+            result = subprocess.run(
+                [sys.executable, str(example), "--output", str(output)],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            report = json.loads((output / "report.json").read_text())
+            self.assertEqual(report["status"], "passed")
+            self.assertEqual(
+                [row["triton_versions"] for row in report["versions"]],
+                [["1"], ["1", "2"], ["1"]],
+            )
+
     def test_log_register_and_save_real_mlflow_model(self):
         # Arrange
         tracking_uri, registry_uri = (

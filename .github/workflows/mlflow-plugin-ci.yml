@@ -81,6 +81,52 @@ jobs:
           mlflow deployments help -t triton-control
           python scripts/test_packages.py --package control
 
+  versioning-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        mlflow: ["3.14.0", "latest"]
+    env:
+      MLFLOW_DISABLE_AGENT_HINT: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - name: Install built core and smoke test dependencies
+        env:
+          MLFLOW_VERSION: ${{ matrix.mlflow }}
+        run: |
+          if [ "$MLFLOW_VERSION" = latest ]; then
+            python -m pip install dist/core/*.whl "mlflow>=3.14,<4" scikit-learn
+          else
+            python -m pip install dist/core/*.whl "mlflow==$MLFLOW_VERSION" scikit-learn
+          fi
+          python -m pip check
+      - name: Verify compatible and incompatible versions in real MLflow
+        shell: bash
+        run: |
+          set -o pipefail
+          python examples/smoke_versioning.py --output "$RUNNER_TEMP/versioning-smoke" \
+            2>&1 | tee "$RUNNER_TEMP/versioning-smoke.log"
+      - name: Upload smoke report, registry, models, and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: versioning-smoke-mlflow-${{ matrix.mlflow }}
+          path: |
+            ${{ runner.temp }}/versioning-smoke/
+            ${{ runner.temp }}/versioning-smoke.log
+          retention-days: 7
+          if-no-files-found: warn
+
   public-data:
     runs-on: ubuntu-latest
     steps:
@@ -130,7 +176,7 @@ jobs:
 
   publish-core:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [build, test, framework-tests, public-data]
+    needs: [build, test, versioning-smoke, framework-tests, public-data]
     runs-on: ubuntu-latest
     environment: pypi-core
     permissions:
