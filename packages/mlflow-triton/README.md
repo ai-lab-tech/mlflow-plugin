@@ -114,8 +114,40 @@ artifact and generated request files, so use non-sensitive examples.
 | `tags` | `None` | Logged-model tags dictionary. |
 | `params` | `None` | Tracking parameters dictionary. For Transformers generation settings, use `model_config`. |
 
-The Triton directory always uses version `1`, independently of the MLflow
-Registry version. Use `name` for the logged model; `artifact_path` is unsupported.
+Use `name` for the logged model; `artifact_path` is unsupported.
+
+### Automatic Triton versions
+
+When `registered_model_name` is supplied, logging compares the generated
+`config.pbtxt` with the latest version of that registered model:
+
+- Equal configuration: copy the previous Triton version directories and add the
+  new model under the next number (`1/`, `2/`, `3/`, ...).
+- Changed configuration: create a fresh Triton repository starting at `1/`.
+- No previous version, or a previous model without the Triton flavor: start at `1/`.
+
+Only `config.pbtxt` determines compatibility. Whitespace and protobuf comments
+are ignored; configuration values and field order are compared. Weights,
+backend code, and requirements are not compared. The `version` embedded inside
+`mlflow_contract` describes the contract format and is compared like any other
+value; it is not the numeric model directory version. The shared config remains
+unchanged as version directories are added. Triton's default policy serves the
+highest numeric version after the repository is loaded.
+
+Every call still creates a new MLflow Registry version. Each artifact contains
+an independent snapshot: earlier artifacts are never modified. For example,
+Registry versions 1 and 2 can contain Triton directories `1/` and `1/, 2/`;
+Registry version 3 with a changed config starts a separate snapshot at `1/`.
+The Triton flavor in `MLmodel` records `model_version`, `repository_group`, and,
+for compatible updates, `previous_model_uri`.
+
+Without `registered_model_name`, logging starts at `1/` and does not look up
+history. Access failures for existing history fail logging instead of silently
+starting over. Copying history increases artifact storage and logging time.
+Calls for the same registered name must run sequentially to maintain a linear
+history; concurrent calls can create independent snapshots from the same parent.
+All included versions must work with the new snapshot's serving requirements,
+because dependency changes intentionally do not affect compatibility.
 
 ### Model saving options
 
