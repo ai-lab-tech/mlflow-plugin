@@ -15,6 +15,9 @@ The `versioning-smoke` job in GitHub Actions runs this check against MLflow
 3.14.0 and the latest supported release using the built core wheel. Each run
 uploads the report, SQLite registry, model artifacts, and log for seven days,
 including partial output on failure. This check must pass before publishing.
+The JSON report records failures as well as successes, and smoke checks remain
+active when Python optimization is enabled. Serving validation selects the
+highest numeric folder, matching the generated default Triton version policy.
 
 ## Saved-model serving validation
 

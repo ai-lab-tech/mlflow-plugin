@@ -43,6 +43,8 @@ def _latest_version(client, name):
 
 
 def _repository_data(flavor):
+    if not isinstance(flavor, dict):
+        raise ValueError("Invalid Triton flavor in previous model")
     data = flavor.get("data")
     if (
         not isinstance(data, str)
@@ -53,6 +55,54 @@ def _repository_data(flavor):
     ):
         raise ValueError("Invalid Triton repository path in previous model")
     return data
+
+
+def _version_directories(repository):
+    """Validate the complete history before changing the prepared repository."""
+    if repository.is_symlink() or any(p.is_symlink() for p in repository.rglob("*")):
+        raise ValueError("Previous Triton assets contain symbolic links")
+    versions = [p for p in repository.iterdir() if p.name.isdecimal()]
+    if not versions or any(
+        not p.is_dir()
+        or not p.name.isascii()
+        or int(p.name) < 1
+        or str(int(p.name)) != p.name
+        for p in versions
+    ):
+        raise ValueError("Previous Triton repository has invalid versions")
+    for version in versions:
+        for required in ("model.py", "artifact/MLmodel"):
+            if not (version / required).is_file():
+                raise ValueError(
+                    f"Incomplete Triton version {version.name}: missing {required}"
+                )
+    return sorted(versions, key=lambda p: int(p.name))
+
+
+def _append_compatible_history(repository, source):
+    """Return the new directory number, or None when config.pbtxt differs."""
+    with TemporaryDirectory(prefix="mlflow-triton-history-") as temporary:
+        config = Path(
+            mlflow.artifacts.download_artifacts(
+                artifact_uri=source + "/config.pbtxt", dst_path=temporary
+            )
+        )
+        if config.is_symlink():
+            raise ValueError("Previous Triton assets contain symbolic links")
+        if _config_tokens(config.read_text()) != _config_tokens(
+            (repository / "config.pbtxt").read_text()
+        ):
+            return None
+
+        history = Path(
+            mlflow.artifacts.download_artifacts(artifact_uri=source, dst_path=temporary)
+        )
+        versions = _version_directories(history)
+        number = int(versions[-1].name) + 1
+        (repository / "1").rename(repository / str(number))
+        for version in versions:
+            shutil.copytree(version, repository / version.name)
+        return number
 
 
 def extend_registered_repository(prepared, registered_model_name):
@@ -68,46 +118,18 @@ def extend_registered_repository(prepared, registered_model_name):
     previous = _latest_version(MlflowClient(), registered_model_name)
     if previous is not None:
         uri = f"models:/{registered_model_name}/{previous.version}"
+        if previous.status != "READY":
+            raise ValueError(
+                f"Previous model {uri} is {previous.status}; expected READY"
+            )
         previous_flavor = mlflow.models.get_model_info(uri).flavors.get("triton")
         if previous_flavor is not None:
             data = _repository_data(previous_flavor)
-            source = uri + "/" + data
-            with TemporaryDirectory(prefix="mlflow-triton-history-") as temporary:
-                config = Path(
-                    mlflow.artifacts.download_artifacts(
-                        artifact_uri=source + "/config.pbtxt", dst_path=temporary
-                    )
+            number = _append_compatible_history(repository, uri + "/" + data)
+            if number is not None:
+                flavor.update(
+                    repository_group=previous_flavor.get("repository_group") or uri,
+                    model_version=number,
+                    previous_model_uri=uri,
                 )
-                if _config_tokens(config.read_text()) == _config_tokens(
-                    (repository / "config.pbtxt").read_text()
-                ):
-                    history = Path(
-                        mlflow.artifacts.download_artifacts(
-                            artifact_uri=source, dst_path=temporary
-                        )
-                    )
-                    if any(p.is_symlink() for p in history.rglob("*")):
-                        raise ValueError(
-                            "Previous Triton assets contain symbolic links"
-                        )
-                    versions = [
-                        p
-                        for p in history.iterdir()
-                        if p.is_dir() and p.name.isascii() and p.name.isdecimal()
-                    ]
-                    if not versions or any(
-                        int(p.name) < 1 or str(int(p.name)) != p.name for p in versions
-                    ):
-                        raise ValueError(
-                            "Previous Triton repository has invalid versions"
-                        )
-                    number = max(int(p.name) for p in versions) + 1
-                    (repository / "1").rename(repository / str(number))
-                    for version in versions:
-                        shutil.copytree(version, repository / version.name)
-                    flavor.update(
-                        repository_group=previous_flavor.get("repository_group") or uri,
-                        model_version=number,
-                        previous_model_uri=uri,
-                    )
     metadata.save(prepared / "MLmodel")

@@ -29,8 +29,8 @@ jobs:
             python scripts/check_release.py --tag "$RELEASE_TAG" --write-version
           fi
           python scripts/check_release.py
-          ruff check packages tests scripts
-          ruff format --check packages tests scripts
+          ruff check packages tests scripts examples/smoke_versioning.py examples/serving_validation.py
+          ruff format --check packages tests scripts examples/smoke_versioning.py examples/serving_validation.py
       - name: Build distributions
         run: |
           python -m build packages/mlflow-triton --outdir dist/core

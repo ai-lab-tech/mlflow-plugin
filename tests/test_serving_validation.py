@@ -3,6 +3,7 @@
 import builtins
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,43 @@ SPEC.loader.exec_module(serving)
 
 
 class ServingValidationTests(unittest.TestCase):
+    def test_native_prediction_uses_latest_numeric_version_and_its_adapter(self):
+        import mlflow.sklearn
+        from mlflow.models import infer_signature
+        from mlflow_triton import _runtime
+        from mlflow_triton._signature import contract_from_signature
+        from sklearn.dummy import DummyRegressor
+
+        # Arrange: 10 must sort after 2; the old adapter must never be imported.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "2").mkdir()
+            (root / "2/model.py").write_text(
+                "raise AssertionError('old adapter loaded')\n"
+            )
+            (root / "10").mkdir()
+            (root / "configs").mkdir()
+            values = np.array([[1.0], [2.0]])
+            model = DummyRegressor(strategy="constant", constant=10.0).fit(
+                values, [0.0, 0.0]
+            )
+            signature = infer_signature(values, model.predict(values))
+            mlflow.sklearn.save_model(
+                model,
+                root / "10/artifact",
+                signature=signature,
+                pip_requirements=["scikit-learn"],
+            )
+            shutil.copyfile(_runtime.__file__, root / "10/model.py")
+            contract = contract_from_signature(signature, "sklearn")
+            tensors = _runtime.example_tensors(values, contract)
+
+            # Act
+            prediction = serving.native_prediction(root, tensors, contract)
+
+            # Assert
+            np.testing.assert_array_equal(prediction["output_0"], [10.0, 10.0])
+
     def comparison_fixture(self):
         expected = {
             "score": np.array([1.0, np.nan, np.inf], dtype=np.float32),

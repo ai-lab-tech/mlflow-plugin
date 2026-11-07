@@ -15,17 +15,20 @@ from sklearn.linear_model import LogisticRegression
 
 class SmokeTests(unittest.TestCase):
     def test_real_trained_models_compatible_and_incompatible_versions(self):
+        # Arrange
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "smoke"
             example = (
                 Path(__file__).resolve().parents[1] / "examples/smoke_versioning.py"
             )
+            # Act
             result = subprocess.run(
                 [sys.executable, str(example), "--output", str(output)],
                 capture_output=True,
                 text=True,
                 timeout=60,
             )
+            # Assert
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             report = json.loads((output / "report.json").read_text())
             self.assertEqual(report["status"], "passed")
@@ -33,6 +36,41 @@ class SmokeTests(unittest.TestCase):
                 [row["triton_versions"] for row in report["versions"]],
                 [["1"], ["1", "2"], ["1"]],
             )
+
+    def test_optimized_smoke_rejects_missing_backend_and_records_failure(self):
+        # Arrange: damage a registered artifact after logging, before inspection.
+        examples = Path(__file__).resolve().parents[1] / "examples"
+        script = """
+import sys
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+import smoke_versioning
+original = smoke_versioning.mlflow.artifacts.download_artifacts
+def download(*args, **kwargs):
+    result = original(*args, **kwargs)
+    if kwargs.get("artifact_uri") == "models:/iris-versioning-smoke/3":
+        (Path(result) / "model_repository/iris/1/model.py").unlink()
+    return result
+with patch.object(smoke_versioning.mlflow.artifacts, "download_artifacts", download):
+    smoke_versioning.run_smoke(sys.argv[2])
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "smoke"
+
+            # Act
+            result = subprocess.run(
+                [sys.executable, "-O", "-c", script, str(examples), str(output)],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+            # Assert
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            report = json.loads((output / "report.json").read_text())
+            self.assertEqual(report["status"], "failed")
+            self.assertIn("missing backend", report["error"])
 
     def test_log_register_and_save_real_mlflow_model(self):
         # Arrange

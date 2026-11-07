@@ -143,7 +143,10 @@ for compatible updates, `previous_model_uri`.
 
 Without `registered_model_name`, logging starts at `1/` and does not look up
 history. Access failures for existing history fail logging instead of silently
-starting over. Copying history increases artifact storage and logging time.
+starting over. The latest Registry version must be `READY`; pending or failed
+registration blocks the update. Matching repositories must contain complete
+numeric versions with `model.py` and `artifact/MLmodel`, and no symbolic links.
+Copying history increases artifact storage and logging time.
 Calls for the same registered name must run sequentially to maintain a linear
 history; concurrent calls can create independent snapshots from the same parent.
 All included versions must work with the new snapshot's serving requirements,
