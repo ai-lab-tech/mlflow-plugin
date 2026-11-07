@@ -34,7 +34,7 @@ class SmokeTests(unittest.TestCase):
             self.assertEqual(report["status"], "passed")
             self.assertEqual(
                 [row["triton_versions"] for row in report["versions"]],
-                [["1"], ["1", "2"], ["1"]],
+                [["1"], ["2"], ["1"]],
             )
 
     def test_optimized_smoke_rejects_missing_backend_and_records_failure(self):

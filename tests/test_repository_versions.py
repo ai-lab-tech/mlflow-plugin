@@ -1,11 +1,11 @@
-"""Registered history preserves Triton versions using only config compatibility."""
+"""Registered updates download only configs and retain only new Triton model files."""
 
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import mlflow
 import numpy as np
@@ -30,7 +30,9 @@ class RepositoryVersionTests(unittest.TestCase):
         (repository / "config.pbtxt").write_text(config)
         (repository / "requirements.txt").write_text(name)
         metadata = Model()
-        metadata.add_flavor("triton", data="model_repository/model", model_name="model")
+        metadata.add_flavor(
+            "triton", data="model_repository/model", model_name="model", model_version=1
+        )
         metadata.save(package / "MLmodel")
         return package, repository
 
@@ -56,22 +58,37 @@ class RepositoryVersionTests(unittest.TestCase):
             _versions.extend_registered_repository(package, "registered")
         return downloads
 
-    def test_equal_configs_accumulate_versions_with_new_weights_and_code(self):
+    def test_equal_configs_advance_versions_without_downloading_old_weights(self):
         # Arrange
         first, original = self.package("first")
         second, repository = self.package("second")
         third, latest = self.package("third")
 
         # Act
-        self.extend(second, first)
-        self.extend(third, second, version="2")
+        downloads = self.extend(second, first)
+        downloads.assert_called_once_with(
+            artifact_uri="models:/registered/1/model_repository/model/config.pbtxt",
+            dst_path=ANY,
+        )
+        downloads = self.extend(third, second, version="2")
+        downloads.assert_called_once_with(
+            artifact_uri="models:/registered/2/model_repository/model/config.pbtxt",
+            dst_path=ANY,
+        )
 
         # Assert
-        for number, expected in ((1, "first"), (2, "second"), (3, "third")):
+        for repo, number, expected in (
+            (original, 1, "first"),
+            (repository, 2, "second"),
+            (latest, 3, "third"),
+        ):
             self.assertEqual(
-                (latest / str(number) / "artifact/weights").read_text(), expected
+                {p.name for p in repo.iterdir() if p.is_dir()}, {str(number)}
             )
-            self.assertEqual((latest / str(number) / "model.py").read_text(), expected)
+            self.assertEqual(
+                (repo / str(number) / "artifact/weights").read_text(), expected
+            )
+            self.assertEqual((repo / str(number) / "model.py").read_text(), expected)
         self.assertEqual((latest / "requirements.txt").read_text(), "third")
         self.assertFalse((original / "2").exists())
         self.assertFalse((repository / "3").exists())
@@ -114,7 +131,7 @@ class RepositoryVersionTests(unittest.TestCase):
         self.assertEqual(tokens[0], tokens[1])
         self.assertNotEqual(tokens[2], tokens[3])
 
-    def test_formatting_only_change_preserves_history(self):
+    def test_formatting_only_change_advances_version(self):
         # Arrange
         previous, _ = self.package("previous")
         package, repository = self.package(
@@ -125,47 +142,44 @@ class RepositoryVersionTests(unittest.TestCase):
         self.extend(package, previous)
 
         # Assert
-        self.assertEqual((repository / "1/artifact/weights").read_text(), "previous")
+        self.assertFalse((repository / "1").exists())
         self.assertEqual((repository / "2/artifact/weights").read_text(), "new")
 
-    def test_next_version_uses_numeric_maximum_even_with_gaps(self):
-        # Arrange
+    def test_legacy_snapshot_uses_metadata_without_copying_old_versions(self):
         previous, history = self.package("previous")
         shutil.copytree(history / "1", history / "10")
-        shutil.copytree(history / "1", history / "2")
+        metadata = Model.load(previous / "MLmodel")
+        metadata.flavors["triton"]["model_version"] = 10
+        metadata.save(previous / "MLmodel")
         package, repository = self.package("new")
 
-        # Act
-        self.extend(package, previous)
+        downloads = self.extend(package, previous)
 
-        # Assert
-        self.assertEqual(
-            {p.name for p in repository.iterdir() if p.is_dir()},
-            {"1", "2", "10", "11"},
-        )
+        self.assertEqual(downloads.call_count, 1)
+        self.assertEqual({p.name for p in repository.iterdir() if p.is_dir()}, {"11"})
         self.assertEqual((repository / "11/artifact/weights").read_text(), "new")
 
-    def test_invalid_version_names_are_rejected(self):
-        for number in ("0", "01", "١"):
+    def test_invalid_previous_version_metadata_is_rejected(self):
+        for number in (None, 0, -1, True, "2", 1.5):
             with self.subTest(number=number):
-                # Arrange
-                previous, history = self.package("previous-" + number)
-                (history / "1").rename(history / number)
-                package, _ = self.package("new-" + number)
+                previous, _ = self.package("previous-" + str(number))
+                metadata = Model.load(previous / "MLmodel")
+                metadata.flavors["triton"]["model_version"] = number
+                metadata.save(previous / "MLmodel")
+                package, repository = self.package("new-" + str(number))
 
-                # Act / Assert
-                with self.assertRaisesRegex(ValueError, "invalid versions"):
+                with self.assertRaisesRegex(ValueError, "Invalid Triton model_version"):
                     self.extend(package, previous)
+                self.assertTrue((repository / "1/artifact/weights").is_file())
 
-    def test_linked_history_assets_are_rejected(self):
-        # Arrange
+    def test_linked_previous_config_is_rejected(self):
         previous, history = self.package("previous")
-        external = self.root / "external"
-        external.write_text("external model content")
-        (history / "1/artifact/link").symlink_to(external)
+        config = history / "config.pbtxt"
+        external = self.root / "external-config"
+        config.rename(external)
+        config.symlink_to(external)
         package, repository = self.package("new")
 
-        # Act / Assert
         with self.assertRaisesRegex(ValueError, "symbolic links"):
             self.extend(package, previous)
         self.assertFalse((repository / "2").exists())
@@ -261,30 +275,16 @@ class RepositoryVersionTests(unittest.TestCase):
                 )
         log.assert_not_called()
 
-    def test_missing_history_versions_are_rejected(self):
-        # Arrange
-        previous, repository = self.package("previous")
-        shutil.rmtree(repository / "1")
-        package, _ = self.package("new")
-        # Act / Assert
-        with self.assertRaisesRegex(ValueError, "invalid versions"):
-            self.extend(package, previous)
+    def test_previous_weights_are_not_required_for_update(self):
+        previous, history = self.package("previous")
+        shutil.rmtree(history / "1")
+        package, repository = self.package("new")
 
-    def test_incomplete_history_is_rejected_before_changing_new_repository(self):
-        for missing in ("model.py", "artifact/MLmodel"):
-            with self.subTest(missing=missing):
-                # Arrange
-                previous, history = self.package(
-                    "previous-" + missing.replace("/", "-")
-                )
-                (history / "1" / missing).unlink()
-                package, repository = self.package("new-" + missing.replace("/", "-"))
+        downloads = self.extend(package, previous)
 
-                # Act / Assert
-                with self.assertRaisesRegex(ValueError, "Incomplete Triton version"):
-                    self.extend(package, previous)
-                self.assertTrue((repository / "1/artifact/weights").is_file())
-                self.assertFalse((repository / "2").exists())
+        self.assertEqual(downloads.call_count, 1)
+        self.assertEqual((repository / "2/artifact/weights").read_text(), "new")
+        self.assertFalse((repository / "1").exists())
 
     def test_unready_registration_is_not_used_as_history(self):
         for status in ("PENDING_REGISTRATION", "FAILED_REGISTRATION"):
@@ -310,7 +310,7 @@ class RepositoryVersionTests(unittest.TestCase):
             "versioning", artifact_location=(self.root / "artifacts").as_uri()
         )
         values = np.array([[1.0], [2.0]])
-        cases = [(1, [1]), (1, [1, 2]), (2, [3]), (2, [3, 4]), (1, [5])]
+        cases = [(1, 1), (1, 2), (2, 1), (2, 2), (1, 1)]
         examples = [np.repeat(values, columns, axis=1) for columns, _ in cases]
         models = [
             DummyRegressor(strategy="constant", constant=float(index)).fit(
@@ -335,7 +335,7 @@ class RepositoryVersionTests(unittest.TestCase):
 
         # Assert
         paths, groups = [], []
-        for index, (info, example, (_, expected_predictions)) in enumerate(
+        for index, (info, example, (_, expected_version)) in enumerate(
             zip(infos, examples, cases), 1
         ):
             self.assertEqual(str(info.registered_model_version), str(index))
@@ -347,19 +347,16 @@ class RepositoryVersionTests(unittest.TestCase):
             paths.append(path)
             flavor = Model.load(path / "MLmodel").flavors["triton"]
             groups.append(flavor["repository_group"])
-            self.assertEqual(flavor["model_version"], len(expected_predictions))
+            self.assertEqual(flavor["model_version"], expected_version)
             repository = path / flavor["data"]
             self.assertEqual(
                 sorted(p.name for p in repository.iterdir() if p.is_dir()),
-                [str(n) for n in range(1, len(expected_predictions) + 1)],
+                [str(expected_version)],
             )
-            for number, expected_prediction in enumerate(expected_predictions, 1):
-                saved = mlflow.pyfunc.load_model(
-                    str(repository / str(number) / "artifact")
-                )
-                np.testing.assert_array_equal(
-                    saved.predict(example), [expected_prediction] * 2
-                )
+            saved = mlflow.pyfunc.load_model(
+                str(repository / str(expected_version) / "artifact")
+            )
+            np.testing.assert_array_equal(saved.predict(example), [index] * 2)
             np.testing.assert_array_equal(
                 mlflow.pyfunc.load_model(info.model_uri).predict(example), [index] * 2
             )

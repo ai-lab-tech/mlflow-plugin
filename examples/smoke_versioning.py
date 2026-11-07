@@ -55,7 +55,7 @@ def run_smoke(output):
         inputs, targets = load_iris(return_X_y=True, as_frame=True)
         cases = [
             ("original", inputs, 1.0, ["1"]),
-            ("compatible", inputs, 0.05, ["1", "2"]),
+            ("compatible", inputs, 0.05, ["2"]),
             ("incompatible", inputs.iloc[:, :3], 0.05, ["1"]),
         ]
         models = [
@@ -64,6 +64,7 @@ def run_smoke(output):
         ]
         infos = []
 
+        original_digest = None
         # Act: log each model through the public API into the same registry entry.
         for (case, features, _, _), model in zip(cases, models):
             with mlflow.start_run(experiment_id=experiment, run_name=case):
@@ -76,6 +77,13 @@ def run_smoke(output):
                         pyfunc_predict_fn="predict_proba",
                     )
                 )
+            if len(infos) == 1:
+                first = Path(
+                    mlflow.artifacts.download_artifacts(
+                        artifact_uri="models:/iris-versioning-smoke/1"
+                    )
+                )
+                original_digest = tree_digest(first)
 
         # Assert: read registered artifacts independently of the logging results.
         repositories, rows = [], report["versions"]
@@ -117,10 +125,7 @@ def run_smoke(output):
                 native = mlflow.pyfunc.load_model(
                     str(repository / version / "artifact")
                 )
-                trained = models[int(version) - 1] if index == 2 else model
-                np.testing.assert_allclose(
-                    native.predict(example), trained.predict_proba(example)
-                )
+                np.testing.assert_allclose(native.predict(example), expected)
             rows.append(
                 {
                     "case": case,
@@ -157,8 +162,8 @@ def run_smoke(output):
             "Incompatible group did not change",
         )
         check(
-            tree_digest(repositories[0] / "1") == tree_digest(repositories[1] / "1"),
-            "Retained version files changed",
+            tree_digest(repositories[0].parents[1]) == original_digest,
+            "Original artifact files changed",
         )
         check(not (repositories[0] / "2").exists(), "Original artifact was modified")
         registered_versions = client.search_model_versions(
@@ -174,7 +179,7 @@ def run_smoke(output):
                 "changed_weights",
                 "config_equality",
                 "config_change",
-                "retained_files_identical",
+                "only_current_version_packaged",
                 "original_unchanged",
                 "native_and_packaged_predictions",
                 "three_ready_registry_versions",

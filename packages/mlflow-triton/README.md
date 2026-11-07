@@ -121,14 +121,17 @@ Use `name` for the logged model; `artifact_path` is unsupported.
 When `registered_model_name` is supplied, logging compares the generated
 `config.pbtxt` with the latest version of that registered model:
 
-- Equal configuration: copy the previous Triton version directories and add the
-  new model under the next number (`1/`, `2/`, `3/`, ...).
+- Equal configuration: save only the new model under the next number
+  (`1/`, `2/`, `3/`, ...), using the previous model’s metadata.
 - Changed configuration: create a fresh Triton repository starting at `1/`.
 - No previous version, or a previous model without the Triton flavor: start at `1/`.
 
 Each call with `registered_model_name` creates a new MLflow Registry version;
-its Triton directory number follows the rules above. Without registration,
-the Triton directory starts at `1/`.
+its artifact contains only the new Triton version. Previous weights and backend
+files are never downloaded or copied during updates; only metadata and the previous
+`config.pbtxt` are read. Older models remain in their original Registry artifacts
+and can be deployed separately. The Triton directory number follows the rules
+above. Without registration, the Triton directory starts at `1/`.
 
 See [model version updates](ADVANCED.md#model-version-updates) for the activity
 diagram, configuration comparison, stored metadata, and concurrency details.

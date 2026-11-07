@@ -79,7 +79,7 @@ or establish GPU correctness.
 
 `registered_model_name` identifies the history used by all framework wrappers.
 Logging compares against the latest Registry version of that name. A matching
-config extends its Triton repository group; a changed config starts a new group
+config continues its Triton repository group; a changed config starts a new group
 at `1/`. A first registration or a previous model without a Triton flavor also
 starts at `1/`.
 
@@ -98,53 +98,55 @@ flowchart TD
     Flavor -->|Yes| Compare["Read previous config.pbtxt and compare configuration tokens"]
     Compare --> Equal{"Configs equal?"}
     Equal -->|No| Fresh
-    Equal -->|Yes| History["Download and validate previous version folders"]
-    History --> Valid{"History complete and valid?"}
+    Equal -->|Yes| Version["Read and validate previous model_version metadata"]
+    Version --> Valid{"Positive integer version?"}
     Valid -->|No| Fail
-    Valid -->|Yes| Append["Keep the repository group and config; copy prior folders and add max version + 1"]
+    Valid -->|Yes| Append["Keep repository group; save only new files under previous model_version + 1"]
     Fresh --> Metadata["Record Triton version and repository group in MLmodel"]
     Append --> Metadata
-    Metadata --> Log["Log the snapshot and create a new MLflow Registry version"]
+    Metadata --> Log["Log the new model and create a new MLflow Registry version"]
     Log --> Done(["Return ModelInfo"])
 ```
 
-For existing folders `1/` and `2/`, the compatible path adds `3/` to the new
-snapshot. Registry or artifact access failures abort logging; deployment loads
-the resulting snapshot separately.
+For a previous model with `model_version: 2`, the compatible path saves only
+`3/` in the new artifact. It reads the previous metadata and `config.pbtxt`,
+without listing, downloading, or copying previous model folders. Registry or
+config access failures abort logging; deployment loads the new artifact separately.
 
 Only `config.pbtxt` determines compatibility. Whitespace and protobuf comments
 are ignored; configuration values and field order are compared. Weights,
 backend code, and requirements are not compared. The `version` embedded inside
 `mlflow_contract` describes the contract format and is compared like any other
-value; it is not the numeric model directory version. The shared config remains
-unchanged as version directories are added. Triton's default policy serves the
-highest numeric version after the repository is loaded.
+value; it is not the numeric model directory version. Compatible updates keep
+that config and save only the new numeric version directory. Triton's default
+policy serves that version after the repository is loaded.
 
 Every call still creates a new MLflow Registry version. Each artifact contains
-an independent snapshot: earlier artifacts are never modified. For example,
-Registry versions 1 and 2 can contain Triton directories `1/` and `1/, 2/`;
-Registry version 3 with a changed config starts a separate snapshot at `1/`.
+only the newly logged Triton version; earlier artifacts are never modified.
+For example, Registry versions 1 and 2 contain Triton directories `1/` and `2/`
+respectively. Registry version 3 with a changed config starts a new group at `1/`.
+Older models remain available through their original Registry versions and can
+be deployed separately; the new artifact does not serve previous versions.
 The Triton flavor in `MLmodel` records `model_version`, `repository_group`, and,
 for compatible updates, `previous_model_uri`.
 
 Without `registered_model_name`, logging starts at `1/` and does not look up
-history. Access failures for existing history fail logging instead of silently
-starting over. The latest Registry version must be `READY`; pending or failed
-registration blocks the update. Matching repositories must contain complete
-numeric versions with `model.py` and `artifact/MLmodel`, and no symbolic links.
-Copying history increases artifact storage and logging time.
+history. Access failures for existing metadata or config fail logging instead of
+silently starting over. The latest Registry version must be `READY`; pending or
+failed registration blocks the update. Matching configs require a positive
+integer `model_version` in the previous Triton metadata. This also supports
+previous artifacts containing multiple version folders without downloading them.
 Calls for the same registered name must run sequentially to maintain a linear
-history; concurrent calls can create independent snapshots from the same parent.
-All included versions must work with the new snapshot's serving requirements,
-because dependency changes intentionally do not affect compatibility.
+version sequence; concurrent calls can choose the same next number.
 
 ## Disk space and concurrent loading
 
 Logging creates two copies of the model: the MLflow model and a self-contained
-copy for Triton serving. Compatible version updates also download and copy
-previous Triton versions into the new snapshot. Allow disk space for these
-copies and MLflow's temporary files. Set `TMPDIR` before logging to choose a temporary directory on a disk with
-enough space. Incomplete staging files are cleaned up if packaging fails.
+copy for Triton serving. Updates read only the previous metadata and config;
+they do not create additional copies of earlier versions. Existing Registry
+artifacts are retained. Allow disk space for the new model's two copies and
+MLflow's temporary files. Set `TMPDIR` before logging to choose a temporary
+directory on a disk with enough space. Incomplete staging files are cleaned up if packaging fails.
 
 The serving runtime temporarily changes MLflow device and offline environment
 settings while loading a model, then restores them. It serializes its own model

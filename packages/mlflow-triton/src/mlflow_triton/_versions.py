@@ -1,6 +1,5 @@
-"""Build immutable Triton repository snapshots from registered model history."""
+"""Number new Triton models using registered metadata and config compatibility."""
 
-import shutil
 import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -57,59 +56,34 @@ def _repository_data(flavor):
     return data
 
 
-def _version_directories(repository):
-    """Validate the complete history before changing the prepared repository."""
-    if repository.is_symlink() or any(p.is_symlink() for p in repository.rglob("*")):
-        raise ValueError("Previous Triton assets contain symbolic links")
-    versions = [p for p in repository.iterdir() if p.name.isdecimal()]
-    if not versions or any(
-        not p.is_dir()
-        or not p.name.isascii()
-        or int(p.name) < 1
-        or str(int(p.name)) != p.name
-        for p in versions
-    ):
-        raise ValueError("Previous Triton repository has invalid versions")
-    for version in versions:
-        for required in ("model.py", "artifact/MLmodel"):
-            if not (version / required).is_file():
-                raise ValueError(
-                    f"Incomplete Triton version {version.name}: missing {required}"
-                )
-    return sorted(versions, key=lambda p: int(p.name))
-
-
-def _append_compatible_history(repository, source):
-    """Return the new directory number, or None when config.pbtxt differs."""
-    with TemporaryDirectory(prefix="mlflow-triton-history-") as temporary:
+def _advance_compatible_version(repository, source, previous_flavor):
+    """Compare only the previous config and keep only the new model's files."""
+    with TemporaryDirectory(prefix="mlflow-triton-config-") as temporary:
         config = Path(
             mlflow.artifacts.download_artifacts(
                 artifact_uri=source + "/config.pbtxt", dst_path=temporary
             )
         )
         if config.is_symlink():
-            raise ValueError("Previous Triton assets contain symbolic links")
+            raise ValueError("Previous Triton config contains symbolic links")
         if _config_tokens(config.read_text()) != _config_tokens(
             (repository / "config.pbtxt").read_text()
         ):
             return None
 
-        history = Path(
-            mlflow.artifacts.download_artifacts(artifact_uri=source, dst_path=temporary)
-        )
-        versions = _version_directories(history)
-        number = int(versions[-1].name) + 1
-        (repository / "1").rename(repository / str(number))
-        for version in versions:
-            shutil.copytree(version, repository / version.name)
-        return number
+    previous_number = previous_flavor.get("model_version")
+    if type(previous_number) is not int or previous_number < 1:
+        raise ValueError("Invalid Triton model_version in previous model metadata")
+    number = previous_number + 1
+    (repository / "1").rename(repository / str(number))
+    return number
 
 
 def extend_registered_repository(prepared, registered_model_name):
-    """Compare only config.pbtxt; copy history only when it matches.
+    """Compare config.pbtxt and number the new model without copying old assets.
 
-    Each log owns its complete snapshot. Never modify registered artifacts.
-    Calls for a registered name must be serialized to produce a linear history.
+    Never modify registered artifacts. Calls for a registered name must be
+    serialized to produce a linear version sequence.
     """
     metadata = Model.load(prepared / "MLmodel")
     flavor = metadata.flavors["triton"]
@@ -125,7 +99,9 @@ def extend_registered_repository(prepared, registered_model_name):
         previous_flavor = mlflow.models.get_model_info(uri).flavors.get("triton")
         if previous_flavor is not None:
             data = _repository_data(previous_flavor)
-            number = _append_compatible_history(repository, uri + "/" + data)
+            number = _advance_compatible_version(
+                repository, uri + "/" + data, previous_flavor
+            )
             if number is not None:
                 flavor.update(
                     repository_group=previous_flavor.get("repository_group") or uri,
