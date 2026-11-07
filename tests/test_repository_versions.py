@@ -159,6 +159,26 @@ class RepositoryVersionTests(unittest.TestCase):
         self.assertEqual({p.name for p in repository.iterdir() if p.is_dir()}, {"11"})
         self.assertEqual((repository / "11/artifact/weights").read_text(), "new")
 
+    def test_missing_version_metadata_uses_legacy_version_one(self):
+        previous, original = self.package("legacy")
+        metadata = Model.load(previous / "MLmodel")
+        del metadata.flavors["triton"]["model_version"]
+        metadata.save(previous / "MLmodel")
+        package, repository = self.package("new")
+
+        downloads = self.extend(package, previous)
+
+        downloads.assert_called_once_with(
+            artifact_uri="models:/registered/1/model_repository/model/config.pbtxt",
+            dst_path=ANY,
+        )
+        self.assertEqual({p.name for p in repository.iterdir() if p.is_dir()}, {"2"})
+        self.assertEqual((repository / "2/artifact/weights").read_text(), "new")
+        self.assertEqual((original / "1/artifact/weights").read_text(), "legacy")
+        flavor = Model.load(package / "MLmodel").flavors["triton"]
+        self.assertEqual(flavor["model_version"], 2)
+        self.assertEqual(flavor["previous_model_uri"], "models:/registered/1")
+
     def test_invalid_previous_version_metadata_is_rejected(self):
         for number in (None, 0, -1, True, "2", 1.5):
             with self.subTest(number=number):

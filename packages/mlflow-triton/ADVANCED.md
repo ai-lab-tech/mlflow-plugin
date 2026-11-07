@@ -133,9 +133,11 @@ for compatible updates, `previous_model_uri`.
 Without `registered_model_name`, logging starts at `1/` and does not look up
 history. Access failures for existing metadata or config fail logging instead of
 silently starting over. The latest Registry version must be `READY`; pending or
-failed registration blocks the update. Matching configs require a positive
-integer `model_version` in the previous Triton metadata. This also supports
-previous artifacts containing multiple version folders without downloading them.
+failed registration blocks the update. When configs match, a missing
+`model_version` is treated as `1` for legacy packages and models registered after
+logging. If present, it must be a positive integer. Previous artifacts containing
+multiple version folders use their recorded `model_version` without downloading
+those folders.
 Calls for the same registered name must run sequentially to maintain a linear
 version sequence; concurrent calls can choose the same next number.
 

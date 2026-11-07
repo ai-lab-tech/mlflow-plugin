@@ -255,7 +255,7 @@ class CoreServerSmokeTests(unittest.TestCase):
         # Assert
         groups = []
         for index, (info, (model, example), versions) in enumerate(
-            zip(infos, cases, (["1"], ["1", "2"], ["1"])), 1
+            zip(infos, cases, (["1"], ["2"], ["1"])), 1
         ):
             _, repository = self.verify_model(
                 info, example, model.predict(example), "sklearn", "iris"
@@ -271,17 +271,48 @@ class CoreServerSmokeTests(unittest.TestCase):
                     "repository_group"
                 ]
             )
-            # Verify retained version 1 independently of the new native model.
-            if index == 2:
-                retained = mlflow.pyfunc.load_model(str(repository / "1/artifact"))
-                np.testing.assert_array_equal(
-                    retained.predict(example), cases[0][0].predict(example)
-                )
         self.assertEqual(groups[0], groups[1])
         self.assertNotEqual(groups[1], groups[2])
+        # Earlier versions remain loadable through their original Registry URI.
+        model, example = cases[0]
+        original = mlflow.pyfunc.load_model(f"models:/{registered_name}/1")
+        np.testing.assert_array_equal(original.predict(example), model.predict(example))
         model, example = cases[1]
         aliased = mlflow.pyfunc.load_model(f"models:/{registered_name}@champion")
         np.testing.assert_array_equal(aliased.predict(example), model.predict(example))
+
+    def test_sklearn_update_after_separate_registration(self):
+        from mlflow_triton import sklearn
+
+        # Separately registered models have the same flavor metadata as legacy
+        # packages: a Triton repository with folder 1/ and no model_version field.
+        model, example = self.iris()
+        previous = sklearn.log_model(
+            model, input_example=example, name="iris", run_id=self.run_id
+        )
+        self.assertNotIn(
+            "model_version",
+            mlflow.models.get_model_info(previous.model_uri).flavors["triton"],
+        )
+        registered_name = "http-separately-registered-iris"
+        mlflow.register_model(previous.model_uri, registered_name)
+        updated, example = self.iris(regularization=0.05)
+
+        info = sklearn.log_model(
+            updated,
+            input_example=example,
+            name="iris",
+            run_id=self.run_id,
+            registered_model_name=registered_name,
+        )
+
+        _, repository = self.verify_model(
+            info, example, updated.predict(example), "sklearn", "iris"
+        )
+        self.assertEqual(str(info.registered_model_version), "2")
+        self.assertEqual({p.name for p in repository.iterdir() if p.is_dir()}, {"2"})
+        original = mlflow.pyfunc.load_model(f"models:/{registered_name}/1")
+        np.testing.assert_array_equal(original.predict(example), model.predict(example))
 
     def test_sklearn_invalid_inputs_do_not_publish_models(self):
         from mlflow_triton import sklearn

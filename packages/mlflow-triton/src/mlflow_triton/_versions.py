@@ -71,7 +71,9 @@ def _advance_compatible_version(repository, source, previous_flavor):
         ):
             return None
 
-    previous_number = previous_flavor.get("model_version")
+    # Older packages and models registered after logging contain only folder 1/
+    # and omit this field. Explicitly invalid values must still fail validation.
+    previous_number = previous_flavor.get("model_version", 1)
     if type(previous_number) is not int or previous_number < 1:
         raise ValueError("Invalid Triton model_version in previous model metadata")
     number = previous_number + 1
