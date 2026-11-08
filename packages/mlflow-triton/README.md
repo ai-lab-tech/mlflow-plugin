@@ -108,6 +108,7 @@ artifact and generated request files, so use non-sensitive examples.
 | `signature` | `None` | MLflow `ModelSignature` with input and output schemas. Inferred from the example and prediction when omitted; `False` is unsupported. |
 | `validate_saved_model` | `False` | When `True`, reload the saved model on CPU for validation. See [validation](#validation-and-limitations). |
 | `registered_model_name` | `None` | Create a version in the MLflow Model Registry. |
+| `previous_model_uri` | `None` | Explicit predecessor (`models:/<model_id>`, Registry version/alias, or `runs:/...`); cannot be combined with `registered_model_name`. |
 | `await_registration_for` | `300` | Registration wait timeout in seconds. |
 | `run_id` | `None` | Associate the model with an MLflow run; otherwise MLflow applies its default run behavior. |
 | `metadata` | `None` | Model metadata dictionary. |
@@ -118,8 +119,9 @@ Use `name` for the logged model; `artifact_path` is unsupported.
 
 ### Automatic Triton versions
 
-When `registered_model_name` is supplied, logging compares the generated
-`config.pbtxt` with the latest version of that registered model:
+When `previous_model_uri` is supplied, logging compares the generated
+`config.pbtxt` with that model. Otherwise, `registered_model_name` selects the
+latest version of that registered model:
 
 - Equal configuration: save only the new model under the next number
   (`1/`, `2/`, `3/`, ...), using the previous model’s metadata.
@@ -131,7 +133,21 @@ its artifact contains only the new Triton version. Previous weights and backend
 files are never downloaded or copied during updates; only metadata and the previous
 `config.pbtxt` are read. Older models remain in their original Registry artifacts
 and can be deployed separately. The Triton directory number follows the rules
-above. Without registration, the Triton directory starts at `1/`.
+above. Without either history parameter, the Triton directory starts at `1/`.
+
+```python
+info = mlflow_triton.sklearn.log_model(
+    updated_model,
+    input_example=X_sample,
+    name="model",
+    previous_model_uri="models:/<model_id>",
+)
+```
+
+An explicit predecessor does not require registration. `previous_model_uri` and
+`registered_model_name` are mutually exclusive: supplying both raises `ValueError`
+before model preparation or logging. Old artifacts are never overwritten. Each version carries
+its own serving requirements at `<version>/requirements.txt`.
 
 See [model version updates](ADVANCED.md#model-version-updates) for the activity
 diagram, configuration comparison, stored metadata, and concurrency details.
@@ -215,10 +231,10 @@ Generated directory layout:
 ```text
 <triton_model_name>/
   config.pbtxt
-  requirements.txt
   request.json        # Or request.bin + request.headers for binary inputs
   validation.json
   1/
+    requirements.txt
     model.py
     artifact/         # Self-contained MLflow model, code and assets
 ```

@@ -285,6 +285,18 @@ def client_main():
 def validate_serving(row, image, python_version, requirements, directory, options):
     directory.mkdir(parents=True, exist_ok=False)
     model = Path(row["serving_path"]).resolve()
+    versions = sorted(
+        (path for path in model.iterdir() if path.is_dir() and path.name.isdecimal()),
+        key=lambda path: int(path.name),
+    )
+    model_requirements = (
+        versions[-1] / "requirements.txt" if versions else model / "requirements.txt"
+    )
+    if not model_requirements.is_file():
+        model_requirements = model / "requirements.txt"
+    container_requirements = (
+        "/model/" + model_requirements.relative_to(model).as_posix()
+    )
     fixture = Path(row["fixture_path"]).resolve()
     helper = Path(__file__).resolve()
     name = "mlflow-serving-" + uuid.uuid4().hex[:12]
@@ -428,7 +440,7 @@ def validate_serving(row, image, python_version, requirements, directory, option
         result["triton_stage"] = "dependency_install"
         if requirements_only:
             (directory / "model-requirements.txt").write_bytes(
-                (model / "requirements.txt").read_bytes()
+                model_requirements.read_bytes()
             )
             run(
                 [
@@ -455,7 +467,7 @@ def validate_serving(row, image, python_version, requirements, directory, option
                     "--report",
                     "/tmp/model-install-report.json",
                     "-r",
-                    "/model/requirements.txt",
+                    container_requirements,
                 ],
                 "install.log",
                 options.timeout,
@@ -492,7 +504,7 @@ def validate_serving(row, image, python_version, requirements, directory, option
                     "-r",
                     "/family-requirements.txt",
                     "-r",
-                    "/model/requirements.txt",
+                    container_requirements,
                     "tritonclient[http,grpc]",
                 ],
                 "install.log",

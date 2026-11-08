@@ -1,13 +1,17 @@
-"""Number new Triton models using registered metadata and config compatibility."""
+"""Number new Triton models using predecessor metadata and config compatibility."""
 
 import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.parse import urlsplit
 
 import mlflow
 from google.protobuf import text_format
 from mlflow.models import Model
+from mlflow.store.artifact.models_artifact_repo import ModelsArtifactRepository
+from mlflow.store.artifact.runs_artifact_repo import RunsArtifactRepository
 from mlflow.tracking import MlflowClient
+from mlflow.utils.file_utils import local_file_uri_to_path
 
 
 def _config_tokens(text):
@@ -81,32 +85,69 @@ def _advance_compatible_version(repository, source, previous_flavor):
     return number
 
 
-def extend_registered_repository(prepared, registered_model_name):
-    """Compare config.pbtxt and number the new model without copying old assets.
+def _previous_artifact_uri(uri):
+    """Pin explicit references once so moving Registry aliases cannot mix artifacts."""
+    if (
+        not isinstance(uri, str)
+        or not uri
+        or urlsplit(uri).scheme not in {"models", "runs"}
+    ):
+        raise ValueError("previous_model_uri must be a models:/ or runs:/ MLflow URI")
+    seen = set()
+    for _ in range(10):
+        if uri in seen:
+            raise ValueError("Cyclic previous_model_uri")
+        seen.add(uri)
+        scheme = urlsplit(uri).scheme
+        if scheme == "models":
+            uri = ModelsArtifactRepository.get_underlying_uri(uri)
+        elif scheme == "runs":
+            uri = RunsArtifactRepository.get_underlying_uri(uri)
+        else:
+            # Model.load expects a filesystem path for local artifacts, not file:/ URIs.
+            return local_file_uri_to_path(uri) if scheme == "file" else uri.rstrip("/")
+    raise ValueError("Too many nested previous_model_uri references")
 
-    Never modify registered artifacts. Calls for a registered name must be
-    serialized to produce a linear version sequence.
+
+def extend_registered_repository(
+    prepared, registered_model_name=None, *, previous_model_uri=None
+):
+    """Number new files using explicit history or the latest Registry version.
+
+    The two history parameters are mutually exclusive. Registered artifacts
+    are never modified. Serialize calls per history to obtain a linear sequence.
     """
+    if registered_model_name is not None and previous_model_uri is not None:
+        raise ValueError(
+            "registered_model_name and previous_model_uri are mutually exclusive"
+        )
     metadata = Model.load(prepared / "MLmodel")
     flavor = metadata.flavors["triton"]
     repository = prepared / flavor["data"]
     flavor.update(repository_group=uuid.uuid4().hex, model_version=1)
-    previous = _latest_version(MlflowClient(), registered_model_name)
-    if previous is not None:
-        uri = f"models:/{registered_model_name}/{previous.version}"
-        if previous.status != "READY":
-            raise ValueError(
-                f"Previous model {uri} is {previous.status}; expected READY"
-            )
-        previous_flavor = mlflow.models.get_model_info(uri).flavors.get("triton")
+    uri = previous_model_uri
+    source = None
+    if uri is not None:
+        source = _previous_artifact_uri(uri)
+    elif registered_model_name is not None:
+        previous = _latest_version(MlflowClient(), registered_model_name)
+        if previous is not None:
+            uri = f"models:/{registered_model_name}/{previous.version}"
+            if previous.status != "READY":
+                raise ValueError(
+                    f"Previous model {uri} is {previous.status}; expected READY"
+                )
+            source = uri
+    if source is not None:
+        previous_flavor = mlflow.models.get_model_info(source).flavors.get("triton")
         if previous_flavor is not None:
             data = _repository_data(previous_flavor)
             number = _advance_compatible_version(
-                repository, uri + "/" + data, previous_flavor
+                repository, source + "/" + data, previous_flavor
             )
             if number is not None:
                 flavor.update(
-                    repository_group=previous_flavor.get("repository_group") or uri,
+                    repository_group=previous_flavor.get("repository_group") or source,
                     model_version=number,
                     previous_model_uri=uri,
                 )

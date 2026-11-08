@@ -1,4 +1,4 @@
-"""Registered updates download only configs and retain only new Triton model files."""
+"""Updates download only configs and retain only new Triton model files."""
 
 import shutil
 import tempfile
@@ -28,7 +28,7 @@ class RepositoryVersionTests(unittest.TestCase):
         (repository / "1/model.py").write_text(name)
         Model().save(repository / "1/artifact/MLmodel")
         (repository / "config.pbtxt").write_text(config)
-        (repository / "requirements.txt").write_text(name)
+        (repository / "1/requirements.txt").write_text(name)
         metadata = Model()
         metadata.add_flavor(
             "triton", data="model_repository/model", model_name="model", model_version=1
@@ -89,7 +89,7 @@ class RepositoryVersionTests(unittest.TestCase):
                 (repo / str(number) / "artifact/weights").read_text(), expected
             )
             self.assertEqual((repo / str(number) / "model.py").read_text(), expected)
-        self.assertEqual((latest / "requirements.txt").read_text(), "third")
+        self.assertEqual((latest / "3/requirements.txt").read_text(), "third")
         self.assertFalse((original / "2").exists())
         self.assertFalse((repository / "3").exists())
         second_flavor = Model.load(second / "MLmodel").flavors["triton"]
@@ -318,6 +318,131 @@ class RepositoryVersionTests(unittest.TestCase):
                     self.extend(package, previous, status=status)
                 self.assertFalse((repository / "2").exists())
 
+    def test_explicit_alias_is_pinned_and_skips_registry_history(self):
+        previous, _ = self.package("previous")
+        package, repository = self.package("new")
+        with (
+            patch.object(
+                _versions.ModelsArtifactRepository,
+                "get_underlying_uri",
+                return_value=previous.as_uri(),
+            ) as resolve,
+            patch.object(_versions, "MlflowClient") as client,
+        ):
+            _versions.extend_registered_repository(
+                package, previous_model_uri="models:/source@champion"
+            )
+        resolve.assert_called_once_with("models:/source@champion")
+        client.assert_not_called()
+        self.assertEqual((repository / "2/requirements.txt").read_text(), "new")
+        self.assertFalse((repository / "1").exists())
+
+    def test_explicit_run_reference_uses_same_update_path(self):
+        previous, _ = self.package("previous-run")
+        package, repository = self.package("new-run")
+        with patch.object(
+            _versions.RunsArtifactRepository,
+            "get_underlying_uri",
+            return_value=previous.as_uri(),
+        ) as resolve:
+            _versions.extend_registered_repository(
+                package, previous_model_uri="runs:/run-id/model"
+            )
+        resolve.assert_called_once_with("runs:/run-id/model")
+        self.assertEqual((repository / "2/requirements.txt").read_text(), "new-run")
+
+    def test_invalid_explicit_reference_is_rejected(self):
+        for index, uri in enumerate(("", 42, "file:///tmp/model", "s3://bucket/model")):
+            package, _ = self.package(f"invalid-{index}")
+            with (
+                self.subTest(uri=uri),
+                self.assertRaisesRegex(ValueError, "previous_model_uri"),
+            ):
+                _versions.extend_registered_repository(package, previous_model_uri=uri)
+
+    def test_explicit_access_failure_does_not_fall_back_to_registry(self):
+        package, _ = self.package("new")
+        with (
+            patch.object(
+                _versions,
+                "_previous_artifact_uri",
+                side_effect=PermissionError("denied"),
+            ),
+            patch.object(_versions, "MlflowClient") as client,
+            self.assertRaisesRegex(PermissionError, "denied"),
+        ):
+            _versions.extend_registered_repository(
+                package, previous_model_uri="models:/m-missing"
+            )
+        client.assert_not_called()
+
+    def test_real_logged_model_history_without_registry(self):
+        tracking, registry = mlflow.get_tracking_uri(), mlflow.get_registry_uri()
+        self.addCleanup(mlflow.set_tracking_uri, tracking)
+        self.addCleanup(mlflow.set_registry_uri, registry)
+        uri = "sqlite:///" + str(self.root / "explicit.db")
+        mlflow.set_tracking_uri(uri)
+        mlflow.set_registry_uri(uri)
+        experiment = mlflow.create_experiment(
+            "explicit", artifact_location=(self.root / "artifacts").as_uri()
+        )
+        values = np.array([[1.0], [2.0]])
+        model = DummyRegressor().fit(values, [1.0, 2.0])
+        with mlflow.start_run(experiment_id=experiment):
+            first = sklearn.log_model(
+                model, input_example=values, pip_requirements=["scikit-learn"]
+            )
+            second = sklearn.log_model(
+                model,
+                input_example=values,
+                previous_model_uri=first.model_uri,
+                pip_requirements=["scikit-learn", "numpy"],
+            )
+            third = sklearn.log_model(
+                model,
+                input_example=values,
+                previous_model_uri=second.model_uri,
+                pip_requirements=["scikit-learn"],
+            )
+            # An explicit older predecessor can start a separate branch.
+            branch = sklearn.log_model(
+                model,
+                input_example=values,
+                previous_model_uri=first.model_uri,
+                pip_requirements=["scikit-learn"],
+            )
+            changed = sklearn.log_model(
+                model,
+                input_example=values,
+                previous_model_uri=third.model_uri,
+                triton_model_name="changed",
+                pip_requirements=["scikit-learn"],
+            )
+        self.assertIsNone(second.registered_model_version)
+        self.assertIsNone(third.registered_model_version)
+        self.assertIsNone(branch.registered_model_version)
+        for info, number in (
+            (first, 1),
+            (second, 2),
+            (third, 3),
+            (branch, 2),
+            (changed, 1),
+        ):
+            path = Path(
+                mlflow.artifacts.download_artifacts(artifact_uri=info.model_uri)
+            )
+            flavor = Model.load(path / "MLmodel").flavors["triton"]
+            self.assertEqual(flavor["model_version"], number)
+            repository = path / flavor["data"]
+            self.assertTrue((repository / str(number) / "requirements.txt").is_file())
+            self.assertFalse((repository / "requirements.txt").exists())
+            self.assertEqual(
+                {p.name for p in repository.iterdir() if p.is_dir()}, {str(number)}
+            )
+            np.testing.assert_array_equal(
+                mlflow.pyfunc.load_model(info.model_uri).predict(values), [1.5, 1.5]
+            )
+
     def test_real_registry_logs_updates_and_config_changes(self):
         # Arrange: returning to an older config must not resurrect its history.
         tracking, registry = mlflow.get_tracking_uri(), mlflow.get_registry_uri()
@@ -373,6 +498,10 @@ class RepositoryVersionTests(unittest.TestCase):
                 sorted(p.name for p in repository.iterdir() if p.is_dir()),
                 [str(expected_version)],
             )
+            self.assertTrue(
+                (repository / str(expected_version) / "requirements.txt").is_file()
+            )
+            self.assertFalse((repository / "requirements.txt").exists())
             saved = mlflow.pyfunc.load_model(
                 str(repository / str(expected_version) / "artifact")
             )

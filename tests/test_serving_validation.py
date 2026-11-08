@@ -117,12 +117,19 @@ class ServingValidationTests(unittest.TestCase):
         requirements_only=False,
         fail_model_install=False,
         fail_dependency_check=False,
+        model_version=None,
     ):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         (root / "model").mkdir()
-        (root / "model/requirements.txt").write_text("mlflow==3.17.2\ntorch==2.9.0\n")
+        requirements_directory = root / "model"
+        if model_version is not None:
+            requirements_directory /= str(model_version)
+            requirements_directory.mkdir()
+        (requirements_directory / "requirements.txt").write_text(
+            "mlflow==3.17.2\ntorch==2.9.0\n"
+        )
         row = {
             "case": "example",
             "serving_path": str(root / "model"),
@@ -348,6 +355,20 @@ class ServingValidationTests(unittest.TestCase):
         self.assertEqual(
             (report_path.parent / "model-requirements.txt").read_text(),
             "mlflow==3.17.2\ntorch==2.9.0\n",
+        )
+
+    def test_version_local_requirements_are_installed(self):
+        _, commands, report_path = self.run_scenario(
+            requirements_only=True, model_version=3
+        )
+        install = next(
+            c
+            for c in commands
+            if "/tmp/model-runtime/bin/python" in c and "install" in c
+        )
+        self.assertEqual(install[install.index("-r") + 1], "/model/3/requirements.txt")
+        self.assertIn(
+            "torch==2.9.0", (report_path.parent / "model-requirements.txt").read_text()
         )
 
     def test_requirements_only_install_failure_never_starts_server(self):

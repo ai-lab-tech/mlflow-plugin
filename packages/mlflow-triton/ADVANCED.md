@@ -27,10 +27,10 @@ flavor pointing to:
 ```text
 model_repository/<triton_model_name>/
   config.pbtxt
-  requirements.txt
   request.json        # Or request.bin + request.headers for binary inputs
   validation.json
   1/
+    requirements.txt
     model.py
     artifact/          # Complete local MLflow package, including code and assets
 ```
@@ -39,8 +39,8 @@ model_repository/<triton_model_name>/
 remain usable for models logged with the framework wrappers. The embedded package is a separate copy so the Triton directory
 can be deployed independently; this increases artifact storage size. Dependencies
 are recorded, not installed into the running Triton server automatically. Build
-an environment from `requirements.txt` with a Python version matching Triton's
-Python backend stub; custom code dependencies must be included or installed.
+an environment from `<version>/requirements.txt` with a Python version matching
+Triton's Python backend stub; custom code dependencies must be included or installed.
 
 The generated configuration uses `backend: "python"` and `max_batch_size: 0`.
 Tensor shapes include their full batch dimension. Column schemas map to separate
@@ -77,8 +77,12 @@ or establish GPU correctness.
 
 ## Model version updates
 
-`registered_model_name` identifies the history used by all framework wrappers.
-Logging compares against the latest Registry version of that name. A matching
+`previous_model_uri` selects an explicit predecessor in all framework wrappers
+(`models:/<model_id>`, a Registry version/alias, or `runs:/<run_id>/<path>`).
+References are resolved once before metadata and config access. If omitted,
+`registered_model_name` selects the latest Registry version of that name.
+The two parameters are mutually exclusive. Supplying both raises `ValueError`
+before model preparation or logging. A matching
 config continues its Triton repository group; a changed config starts a new group
 at `1/`. A first registration or a previous model without a Triton flavor also
 starts at `1/`.
@@ -121,19 +125,24 @@ value; it is not the numeric model directory version. Compatible updates keep
 that config and save only the new numeric version directory. Triton's default
 policy serves that version after the repository is loaded.
 
-Every call still creates a new MLflow Registry version. Each artifact contains
+Every call creates a new logged model; supplying `registered_model_name` also
+creates a new MLflow Registry version. Each artifact contains
 only the newly logged Triton version; earlier artifacts are never modified.
 For example, Registry versions 1 and 2 contain Triton directories `1/` and `2/`
 respectively. Registry version 3 with a changed config starts a new group at `1/`.
 Older models remain available through their original Registry versions and can
 be deployed separately; the new artifact does not serve previous versions.
+Serving requirements are stored in `<version>/requirements.txt`, alongside
+`model.py`, and move with the new version directory. Changing requirements alone
+does not reset the Triton version; deployment must provide the matching environment.
 The Triton flavor in `MLmodel` records `model_version`, `repository_group`, and,
 for compatible updates, `previous_model_uri`.
 
-Without `registered_model_name`, logging starts at `1/` and does not look up
-history. Access failures for existing metadata or config fail logging instead of
-silently starting over. The latest Registry version must be `READY`; pending or
-failed registration blocks the update. When configs match, a missing
+Without either `previous_model_uri` or `registered_model_name`, logging starts at
+`1/` and does not look up history. Access failures for existing metadata or config
+fail logging instead of silently starting over. When selecting history by registered
+name, the latest Registry version must be `READY`; pending or failed registration
+blocks the update. When configs match, a missing
 `model_version` is treated as `1` for legacy packages and models registered after
 logging. If present, it must be a positive integer. Previous artifacts containing
 multiple version folders use their recorded `model_version` without downloading

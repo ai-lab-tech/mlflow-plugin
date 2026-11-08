@@ -130,11 +130,11 @@ class CoreServerSmokeTests(unittest.TestCase):
         version = str(triton.get("model_version", 1))
         for filename in (
             "config.pbtxt",
-            "requirements.txt",
             "validation.json",
             "request.json",
         ):
             self.assertTrue((repository / filename).is_file(), filename)
+        self.assertTrue((repository / version / "requirements.txt").is_file())
         self.assertTrue((repository / version / "model.py").is_file())
         self.assertTrue((repository / version / "artifact/MLmodel").is_file())
         self.assertIn(

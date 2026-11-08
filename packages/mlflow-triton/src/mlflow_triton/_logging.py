@@ -188,7 +188,7 @@ def _assemble_repository(
     shutil.copyfile(Path(_runtime.__file__), version / "model.py")
     (repository / "config.pbtxt").write_text(config)
     write_request_example(repository, input_example, contract)
-    (repository / "requirements.txt").write_text(
+    (version / "requirements.txt").write_text(
         serving_requirements(package, mlflow.__version__), encoding="utf-8"
     )
     (repository / "validation.json").write_text(
@@ -217,6 +217,7 @@ def _assemble_repository(
         "triton",
         data=f"model_repository/{triton_model_name}",
         model_name=triton_model_name,
+        model_version=1,
     )
     metadata.save(package / "MLmodel")
     return package
@@ -318,6 +319,7 @@ def log_native_model(
     device="cpu",
     validate_saved_model=False,
     registered_model_name=None,
+    previous_model_uri=None,
     await_registration_for=300,
     run_id=None,
     metadata=None,
@@ -325,6 +327,10 @@ def log_native_model(
     params=None,
     **save_kwargs,
 ):
+    if registered_model_name is not None and previous_model_uri is not None:
+        raise ValueError(
+            "registered_model_name and previous_model_uri are mutually exclusive"
+        )
     with tempfile.TemporaryDirectory(prefix="mlflow-triton-log-") as temporary:
         prepared = Path(temporary) / "prepared"
         prepare_model(
@@ -339,8 +345,10 @@ def log_native_model(
             metadata=metadata,
             **save_kwargs,
         )
-        if registered_model_name is not None:
-            extend_registered_repository(prepared, registered_model_name)
+        if registered_model_name is not None or previous_model_uri is not None:
+            extend_registered_repository(
+                prepared, registered_model_name, previous_model_uri=previous_model_uri
+            )
         return Model.log(
             artifact_path=None,
             flavor=sys.modules[__name__],
