@@ -328,6 +328,39 @@ class LoggingWrapperTests(unittest.TestCase):
         ):
             self.prepare()
 
+    def test_cpu_wheel_selection_is_applied_only_to_automatic_serving_requirements(
+        self,
+    ):
+        for explicit in (False, True):
+            with self.subTest(explicit=explicit):
+                path = self.root / f"cpu-wheels-{explicit}"
+                options = (
+                    {"pip_requirements": ["scikit-learn", "torch==2.14.1"]}
+                    if explicit
+                    else {"extra_pip_requirements": ["torch==2.14.1"]}
+                )
+                _logging.prepare_model(
+                    "sklearn",
+                    fixture_model(),
+                    path,
+                    input_example=self.example,
+                    **options,
+                )
+                native = (path / "requirements.txt").read_text()
+                serving = (
+                    path / "model_repository/model/1/requirements.txt"
+                ).read_text()
+                self.assertIn("torch==2.14.1", native)
+                self.assertNotIn("+cpu", native)
+                if explicit:
+                    self.assertNotIn("+cpu", serving)
+                    self.assertNotIn("find-links", serving)
+                else:
+                    self.assertIn("torch==2.14.1+cpu", serving)
+                    self.assertIn(
+                        "https://download.pytorch.org/whl/cpu/torch/", serving
+                    )
+
     def test_default_requirements_keep_extra_requirements_and_constraints(self):
         # Arrange
         constraints = self.root / "constraints.txt"

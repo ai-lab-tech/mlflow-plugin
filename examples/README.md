@@ -347,6 +347,13 @@ CPU/GPU differences remain separate diagnostics with unchanged tolerances.
 Dependency installation or validation failures remain failures; the runner does
 not add missing model dependencies automatically.
 
+For automatic CPU packages, the generated file includes exact CPU Torch-family
+pins and package-specific wheel sources. This also works with
+`--requirements-only`: no installer-specific CUDA-to-CPU substitution is needed.
+Explicit user requirements retain their build choices. A strict test still
+creates a fresh model environment to check dependency completeness, so it does
+not measure reuse of packages already present in a production image.
+
 Packaging still uses the saved producer dependencies to load and log the model.
 The strict dependency check applies to the subsequent serving environment.
 The default runtime base remains Triton `26.06-py3`, with the matching Python

@@ -50,11 +50,13 @@ class GeneratedRequirementsTests(unittest.TestCase):
         # Arrange
         native = self.repository / "native"
         native.mkdir()
-        (native / "requirements.txt").write_text("numpy>=1.20\n-c constraints.txt\n")
+        (native / "requirements.txt").write_text(
+            "numpy>=1.20\ntorch==2.14.1\n-c constraints.txt\n"
+        )
         (native / "constraints.txt").write_text("numpy<2\n")
         repository = self.repository / "model_repository/classifier"
         (repository / "2").mkdir(parents=True)
-        generated = serving_requirements(native, "3.14.0")
+        generated = serving_requirements(native, "3.14.0", prefer_cpu_torch=True)
         (repository / "2/requirements.txt").write_text(generated)
         metadata = Model()
         metadata.add_flavor(
@@ -93,9 +95,16 @@ class GeneratedRequirementsTests(unittest.TestCase):
         # Assert
         payload = request.call_args_list[1].kwargs["json"]
         self.assertEqual(payload["requirements_txt"], generated)
-        # Triton Control validates each line with packaging.Requirement as well.
+        self.assertIn(
+            "--find-links https://download.pytorch.org/whl/cpu/torch/", generated
+        )
+        self.assertIn("torch==2.14.1+cpu", generated)
+        # Package lines remain PEP 508 requirements; wheel-source options are
+        # validated separately by the updated Triton Control backend.
         requirements = [
-            Requirement(line) for line in payload["requirements_txt"].splitlines()
+            Requirement(line)
+            for line in payload["requirements_txt"].splitlines()
+            if not line.startswith("--find-links ")
         ]
         numpy = next(item for item in requirements if item.name == "numpy")
         self.assertIn("1.26.4", numpy.specifier)
