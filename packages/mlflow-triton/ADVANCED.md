@@ -27,10 +27,10 @@ flavor pointing to:
 ```text
 model_repository/<triton_model_name>/
   config.pbtxt
-  requirements.txt
   request.json        # Or request.bin + request.headers for binary inputs
   validation.json
   1/
+    requirements.txt
     model.py
     artifact/          # Complete local MLflow package, including code and assets
 ```
@@ -39,8 +39,8 @@ model_repository/<triton_model_name>/
 remain usable for models logged with the framework wrappers. The embedded package is a separate copy so the Triton directory
 can be deployed independently; this increases artifact storage size. Dependencies
 are recorded, not installed into the running Triton server automatically. Build
-an environment from `requirements.txt` with a Python version matching Triton's
-Python backend stub; custom code dependencies must be included or installed.
+an environment from `<version>/requirements.txt` with a Python version matching
+Triton's Python backend stub; custom code dependencies must be included or installed.
 
 The generated configuration uses `backend: "python"` and `max_batch_size: 0`.
 Tensor shapes include their full batch dimension. Column schemas map to separate
@@ -75,12 +75,87 @@ records whether the saved artifact was checked, and distinguishes local mapping
 validation from actual Triton validation. Logging does **not** launch Triton, deploy a service,
 or establish GPU correctness.
 
+## Model version updates
+
+`model_uri` selects an explicit predecessor in all framework wrappers
+(`models:/<model_id>`, a Registry version/alias, or `runs:/<run_id>/<path>`).
+Run and Registry references must resolve to a package with an MLflow 3 logged-model
+ID to permit compatible updates. Missing identity fails clearly rather than
+silently creating another model. Explicit references are resolved once before
+metadata and config access. Alternatively, `registered_model_name` selects the
+latest Registry version of that name. The parameters are mutually exclusive;
+supplying both raises `ValueError` before preparation or logging.
+
+Both selection methods follow the same rules:
+
+| Predecessor | Logged model | Triton directory | Registry when selected by name |
+| --- | --- | --- | --- |
+| Matching config | Reuse existing ID | Append next number; retain earlier versions | Reuse current Registry version |
+| Different config | Create new ID | Start at `1/` | Create next Registry version |
+| None, or no Triton flavor | Create new ID | Start at `1/` | Create first/next Registry version |
+
+```mermaid
+flowchart TD
+    Start["Prepare model and config.pbtxt"] --> Lookup["Resolve explicit predecessor or latest Registry version"]
+    Lookup --> Compatible{"Triton predecessor with equal config?"}
+    Compatible -->|Yes| Append["Reuse model ID; upload next Triton directory and latest native package"]
+    Compatible -->|No| New["Create model ID with Triton directory 1/"]
+    Append --> Existing["Keep existing Registry version, if selected by name"]
+    New --> Register["Create Registry version, if selected by name"]
+    Existing --> Done["Return ModelInfo"]
+    Register --> Done
+```
+
+For example, two compatible calls with `registered_model_name="classifier"`
+keep Registry version 1 and the same logged-model ID. Its repository now contains
+both `1/` and `2/`. A third call with a changed config creates Registry version 2
+with a different model ID and a repository starting at `1/`.
+`info.registered_model_version` returns the reused or newly created Registry
+version for name-based logging. Explicit URI updates do not register anything.
+
+MLflow's `MlflowClient.log_model_artifacts` uploads the new files into the existing
+artifact location. Run/model output links are added only if not already present. Earlier numeric directories are left untouched, including their
+weights, backend code, native packages, and `<version>/requirements.txt`.
+The native package at the artifact root, request example, validation report,
+and `MLmodel` metadata are replaced by the latest model. Consequently the same
+`models:/<model_id>` and Registry URI now load the **latest** native weights.
+To load an older native package, use its `<version>/artifact/` directory.
+No old model weights are downloaded or copied during updates.
+
+Only `config.pbtxt` determines compatibility. Whitespace and protobuf comments
+are ignored; configuration values and field order are compared. Weights,
+backend code, and requirements are not compared. The `version` embedded inside
+`mlflow_contract` describes the contract format, not the Triton directory number.
+A requirements-only change therefore appends a version; deployment must provide
+its matching environment. Triton's default version policy loads the latest
+numeric directory when the repository is loaded. Logging does not reload an
+already running Triton server.
+
+The Triton flavor records `model_version`, `repository_group`, and, for compatible
+updates, `model_uri`. Missing `model_version` defaults to `1` for legacy
+packages; an explicit value must be a positive integer. Access failures abort
+logging. The latest Registry version must be `READY` when selecting by name.
+Without either history parameter, logging creates a new model at `1/`.
+
+Updates retain the logged model's original name, experiment, source run, model
+parameters, and tags. MLflow associates an active/supplied update run with the
+same model as an output; the artifact's metadata and native package describe
+the latest update. `name`, `params`, and `tags` passed to logging apply when a
+new logged model is created.
+
+Calls updating the same model or registered name must run sequentially; there
+is no distributed lock. Artifact uploads are not transactional: a failed upload
+can leave partial files and MLflow may mark the model failed. Earlier numeric
+version directories are not overwritten by the update.
+
 ## Disk space and concurrent loading
 
 Logging creates two copies of the model: the MLflow model and a self-contained
-copy for Triton serving. Allow disk space for both copies and MLflow's temporary
-files. Set `TMPDIR` before logging to choose a temporary directory on a disk with
-enough space. Incomplete staging files are cleaned up if packaging fails.
+copy for Triton serving. Updates read only the previous metadata and config;
+they do not create additional copies of earlier versions. Existing Triton
+version directories are retained. Allow disk space for the new model's two copies and
+MLflow's temporary files. Set `TMPDIR` before logging to choose a temporary
+directory on a disk with enough space. Incomplete staging files are cleaned up if packaging fails.
 
 The serving runtime temporarily changes MLflow device and offline environment
 settings while loading a model, then restores them. It serializes its own model
@@ -128,7 +203,7 @@ example; use non-sensitive examples.
 ## Inspect model architecture without loading weights
 
 PyTorch and Transformers wrappers automatically include `architecture.json` in the
-MLflow artifact and its self-contained Triton `1/artifact/` copy. Read this JSON
+MLflow artifact and its self-contained Triton `<version>/artifact/` copy. Read this JSON
 without importing custom model code or loading weights. It records the model class,
 module classes, parameter/buffer shapes and dtypes (never tensor values), and relative
 paths to packaged Python and configuration files. Transformers reports component

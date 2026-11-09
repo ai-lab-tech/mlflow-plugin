@@ -52,6 +52,19 @@ def _read_requirements(repository_artifact_uri):
         ) from exc
 
 
+def _read_version_requirements(repository_uri, flavor):
+    """Prefer version-local requirements, retaining support for older artifacts."""
+    number = flavor.get("model_version", 1)
+    if type(number) is not int or number < 1:
+        raise MlflowException("Invalid Triton model_version in model metadata")
+    entries = mlflow.artifacts.list_artifacts(artifact_uri=repository_uri)
+    if any(item.is_dir and Path(item.path).name == str(number) for item in entries):
+        requirements = _read_requirements(repository_uri + "/" + str(number))
+        if requirements is not None:
+            return requirements
+    return _read_requirements(repository_uri)
+
+
 def resolve_deployment_artifacts(model_uri):
     """Resolve one model version and retrieve its generated serving requirements."""
     return _resolve_model(model_uri, include_requirements=True)
@@ -152,7 +165,7 @@ def _resolve_model(model_uri, *, include_requirements):
                 "Triton flavor model_name does not match its data path"
             )
         requirements = (
-            _read_requirements(artifact_uri.rstrip("/") + "/" + data)
+            _read_version_requirements(artifact_uri.rstrip("/") + "/" + data, flavor)
             if include_requirements
             else None
         )

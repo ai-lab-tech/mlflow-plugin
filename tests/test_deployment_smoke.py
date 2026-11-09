@@ -40,7 +40,7 @@ class DeploymentSmokeTests(unittest.TestCase):
                 ),
             ),
             patch(
-                "mlflow_triton_control._model_uri._read_requirements",
+                "mlflow_triton_control._model_uri._read_version_requirements",
                 return_value="scikit-learn==1.7.2\n",
             ),
             patch.dict(
