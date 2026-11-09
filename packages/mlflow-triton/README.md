@@ -243,14 +243,21 @@ Generated directory layout:
 
 By default, dependencies are observed during the existing in-memory example
 prediction, including packages referenced through already-imported modules and
-cached callables. Observed distributions are pinned to their installed versions
+cached callables. Only executed accesses and successful imports are observed;
+names in an unexecuted training branch are not added. Shared package namespaces
+are resolved to the distribution owning the observed module. Observed
+distributions are pinned to their installed versions
 and combined with MLflow's framework defaults; the backend's NumPy and pandas
 dependencies are included too. This does not reload the model, copy weights, or
 export the entire training environment. Installed packages with matching versions
 can be reused in the Triton image.
 
-Capture is sample-based and runs on the prediction thread. Add dependencies for
-unexercised paths or work in other threads/processes with `extra_pip_requirements`.
+Capture uses Python instruction tracing during this one prediction and adds CPU
+overhead to packaging, not to the generated serving backend. Existing profilers
+remain active. Capture is sample-based and runs on the prediction thread; it is
+not a complete dependency lock. Add dependencies for unexercised paths, loading
+or serialization-only code, opaque native code, or work in other threads/processes
+with `extra_pip_requirements`.
 Bundled local code still requires `code_paths`. Explicit `pip_requirements` and
 `conda_env` bypass capture. With `validate_saved_model=True`, native MLflow
 dependency inference applies instead, and may reload the model in a subprocess.
