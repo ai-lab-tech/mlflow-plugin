@@ -1,6 +1,7 @@
 """Number new Triton models using predecessor metadata and config compatibility."""
 
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
@@ -12,6 +13,14 @@ from mlflow.store.artifact.models_artifact_repo import ModelsArtifactRepository
 from mlflow.store.artifact.runs_artifact_repo import RunsArtifactRepository
 from mlflow.tracking import MlflowClient
 from mlflow.utils.file_utils import local_file_uri_to_path
+
+
+@dataclass(frozen=True)
+class RepositoryUpdate:
+    """Existing logged model (and optional registration) to reuse."""
+
+    model_id: str
+    registered_model_version: int | None = None
 
 
 def _config_tokens(text):
@@ -61,7 +70,7 @@ def _repository_data(flavor):
 
 
 def _advance_compatible_version(repository, source, previous_flavor):
-    """Compare only the previous config and keep only the new model's files."""
+    """Prepare only the new directory; older directories remain in remote storage."""
     with TemporaryDirectory(prefix="mlflow-triton-config-") as temporary:
         config = Path(
             mlflow.artifacts.download_artifacts(
@@ -92,11 +101,11 @@ def _previous_artifact_uri(uri):
         or not uri
         or urlsplit(uri).scheme not in {"models", "runs"}
     ):
-        raise ValueError("previous_model_uri must be a models:/ or runs:/ MLflow URI")
+        raise ValueError("model_uri must be a models:/ or runs:/ MLflow URI")
     seen = set()
     for _ in range(10):
         if uri in seen:
-            raise ValueError("Cyclic previous_model_uri")
+            raise ValueError("Cyclic model_uri")
         seen.add(uri)
         scheme = urlsplit(uri).scheme
         if scheme == "models":
@@ -106,27 +115,29 @@ def _previous_artifact_uri(uri):
         else:
             # Model.load expects a filesystem path for local artifacts, not file:/ URIs.
             return local_file_uri_to_path(uri) if scheme == "file" else uri.rstrip("/")
-    raise ValueError("Too many nested previous_model_uri references")
+    raise ValueError("Too many nested model_uri references")
 
 
 def extend_registered_repository(
-    prepared, registered_model_name=None, *, previous_model_uri=None
+    prepared, registered_model_name=None, *, model_uri=None
 ):
-    """Number new files using explicit history or the latest Registry version.
+    """Prepare an append and return its existing model identity, or None for new models.
 
-    The two history parameters are mutually exclusive. Registered artifacts
-    are never modified. Serialize calls per history to obtain a linear sequence.
+    The two history parameters are mutually exclusive. Matching configs reuse
+    the logged model and registration. Serialize calls per model/history.
     """
-    if registered_model_name is not None and previous_model_uri is not None:
+    if registered_model_name is not None and model_uri is not None:
         raise ValueError(
-            "registered_model_name and previous_model_uri are mutually exclusive"
+            "registered_model_name and model_uri are mutually exclusive"
         )
     metadata = Model.load(prepared / "MLmodel")
     flavor = metadata.flavors["triton"]
     repository = prepared / flavor["data"]
     flavor.update(repository_group=uuid.uuid4().hex, model_version=1)
-    uri = previous_model_uri
+    uri = model_uri
     source = None
+    registry_version = None
+    update = None
     if uri is not None:
         source = _previous_artifact_uri(uri)
     elif registered_model_name is not None:
@@ -138,17 +149,27 @@ def extend_registered_repository(
                     f"Previous model {uri} is {previous.status}; expected READY"
                 )
             source = uri
+            registry_version = int(previous.version)
     if source is not None:
-        previous_flavor = mlflow.models.get_model_info(source).flavors.get("triton")
+        previous_info = mlflow.models.get_model_info(source)
+        previous_flavor = previous_info.flavors.get("triton")
         if previous_flavor is not None:
             data = _repository_data(previous_flavor)
             number = _advance_compatible_version(
                 repository, source + "/" + data, previous_flavor
             )
             if number is not None:
+                model_id = getattr(previous_info, "model_id", None)
+                if not isinstance(model_id, str) or not model_id:
+                    raise ValueError(
+                        "Compatible predecessor has no MLflow logged-model ID; "
+                        "log it with MLflow 3 before updating it in place"
+                    )
+                update = RepositoryUpdate(model_id, registry_version)
                 flavor.update(
                     repository_group=previous_flavor.get("repository_group") or source,
                     model_version=number,
-                    previous_model_uri=uri,
+                    model_uri=uri,
                 )
     metadata.save(prepared / "MLmodel")
+    return update

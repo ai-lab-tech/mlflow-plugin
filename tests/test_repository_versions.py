@@ -1,4 +1,4 @@
-"""Updates download only configs and retain only new Triton model files."""
+"""Compatible updates append to the same model; config changes start a new model."""
 
 import shutil
 import tempfile
@@ -38,6 +38,7 @@ class RepositoryVersionTests(unittest.TestCase):
 
     def extend(self, package, previous, version="1", status="READY"):
         metadata = Model.load(previous / "MLmodel")
+        metadata.model_id = "m-existing"
 
         def download(artifact_uri, dst_path):
             relative = artifact_uri.split(f"/{version}/", 1)[1]
@@ -55,7 +56,10 @@ class RepositoryVersionTests(unittest.TestCase):
                 "mlflow.artifacts.download_artifacts", side_effect=download
             ) as downloads,
         ):
-            _versions.extend_registered_repository(package, "registered")
+            update = _versions.extend_registered_repository(package, "registered")
+            if update is not None:
+                self.assertEqual(update.model_id, "m-existing")
+                self.assertEqual(update.registered_model_version, int(version))
         return downloads
 
     def test_equal_configs_advance_versions_without_downloading_old_weights(self):
@@ -98,7 +102,7 @@ class RepositoryVersionTests(unittest.TestCase):
             second_flavor["repository_group"], third_flavor["repository_group"]
         )
         self.assertEqual(third_flavor["model_version"], 3)
-        self.assertEqual(third_flavor["previous_model_uri"], "models:/registered/2")
+        self.assertEqual(third_flavor["model_uri"], "models:/registered/2")
 
     def test_changed_config_starts_at_one_without_downloading_weights(self):
         # Arrange
@@ -113,7 +117,7 @@ class RepositoryVersionTests(unittest.TestCase):
         self.assertEqual((repository / "1/artifact/weights").read_text(), "second")
         flavor = Model.load(second / "MLmodel").flavors["triton"]
         self.assertEqual(flavor["model_version"], 1)
-        self.assertNotIn("previous_model_uri", flavor)
+        self.assertNotIn("model_uri", flavor)
 
     def test_config_comparison_ignores_formatting_but_keeps_contract_version(self):
         # Arrange
@@ -177,7 +181,7 @@ class RepositoryVersionTests(unittest.TestCase):
         self.assertEqual((original / "1/artifact/weights").read_text(), "legacy")
         flavor = Model.load(package / "MLmodel").flavors["triton"]
         self.assertEqual(flavor["model_version"], 2)
-        self.assertEqual(flavor["previous_model_uri"], "models:/registered/1")
+        self.assertEqual(flavor["model_uri"], "models:/registered/1")
 
     def test_invalid_previous_version_metadata_is_rejected(self):
         for number in (None, 0, -1, True, "2", 1.5):
@@ -321,7 +325,10 @@ class RepositoryVersionTests(unittest.TestCase):
     def test_explicit_alias_is_pinned_and_skips_registry_history(self):
         previous, _ = self.package("previous")
         package, repository = self.package("new")
+        metadata = Model.load(previous / "MLmodel")
+        metadata.model_id = "m-existing"
         with (
+            patch("mlflow.models.get_model_info", return_value=metadata),
             patch.object(
                 _versions.ModelsArtifactRepository,
                 "get_underlying_uri",
@@ -330,7 +337,7 @@ class RepositoryVersionTests(unittest.TestCase):
             patch.object(_versions, "MlflowClient") as client,
         ):
             _versions.extend_registered_repository(
-                package, previous_model_uri="models:/source@champion"
+                package, model_uri="models:/source@champion"
             )
         resolve.assert_called_once_with("models:/source@champion")
         client.assert_not_called()
@@ -340,13 +347,18 @@ class RepositoryVersionTests(unittest.TestCase):
     def test_explicit_run_reference_uses_same_update_path(self):
         previous, _ = self.package("previous-run")
         package, repository = self.package("new-run")
-        with patch.object(
-            _versions.RunsArtifactRepository,
-            "get_underlying_uri",
-            return_value=previous.as_uri(),
-        ) as resolve:
+        metadata = Model.load(previous / "MLmodel")
+        metadata.model_id = "m-existing"
+        with (
+            patch("mlflow.models.get_model_info", return_value=metadata),
+            patch.object(
+                _versions.RunsArtifactRepository,
+                "get_underlying_uri",
+                return_value=previous.as_uri(),
+            ) as resolve,
+        ):
             _versions.extend_registered_repository(
-                package, previous_model_uri="runs:/run-id/model"
+                package, model_uri="runs:/run-id/model"
             )
         resolve.assert_called_once_with("runs:/run-id/model")
         self.assertEqual((repository / "2/requirements.txt").read_text(), "new-run")
@@ -356,9 +368,9 @@ class RepositoryVersionTests(unittest.TestCase):
             package, _ = self.package(f"invalid-{index}")
             with (
                 self.subTest(uri=uri),
-                self.assertRaisesRegex(ValueError, "previous_model_uri"),
+                self.assertRaisesRegex(ValueError, "model_uri"),
             ):
-                _versions.extend_registered_repository(package, previous_model_uri=uri)
+                _versions.extend_registered_repository(package, model_uri=uri)
 
     def test_explicit_access_failure_does_not_fall_back_to_registry(self):
         package, _ = self.package("new")
@@ -372,79 +384,24 @@ class RepositoryVersionTests(unittest.TestCase):
             self.assertRaisesRegex(PermissionError, "denied"),
         ):
             _versions.extend_registered_repository(
-                package, previous_model_uri="models:/m-missing"
+                package, model_uri="models:/m-missing"
             )
         client.assert_not_called()
 
-    def test_real_logged_model_history_without_registry(self):
-        tracking, registry = mlflow.get_tracking_uri(), mlflow.get_registry_uri()
-        self.addCleanup(mlflow.set_tracking_uri, tracking)
-        self.addCleanup(mlflow.set_registry_uri, registry)
-        uri = "sqlite:///" + str(self.root / "explicit.db")
-        mlflow.set_tracking_uri(uri)
-        mlflow.set_registry_uri(uri)
-        experiment = mlflow.create_experiment(
-            "explicit", artifact_location=(self.root / "artifacts").as_uri()
-        )
-        values = np.array([[1.0], [2.0]])
-        model = DummyRegressor().fit(values, [1.0, 2.0])
-        with mlflow.start_run(experiment_id=experiment):
-            first = sklearn.log_model(
-                model, input_example=values, pip_requirements=["scikit-learn"]
-            )
-            second = sklearn.log_model(
-                model,
-                input_example=values,
-                previous_model_uri=first.model_uri,
-                pip_requirements=["scikit-learn", "numpy"],
-            )
-            third = sklearn.log_model(
-                model,
-                input_example=values,
-                previous_model_uri=second.model_uri,
-                pip_requirements=["scikit-learn"],
-            )
-            # An explicit older predecessor can start a separate branch.
-            branch = sklearn.log_model(
-                model,
-                input_example=values,
-                previous_model_uri=first.model_uri,
-                pip_requirements=["scikit-learn"],
-            )
-            changed = sklearn.log_model(
-                model,
-                input_example=values,
-                previous_model_uri=third.model_uri,
-                triton_model_name="changed",
-                pip_requirements=["scikit-learn"],
-            )
-        self.assertIsNone(second.registered_model_version)
-        self.assertIsNone(third.registered_model_version)
-        self.assertIsNone(branch.registered_model_version)
-        for info, number in (
-            (first, 1),
-            (second, 2),
-            (third, 3),
-            (branch, 2),
-            (changed, 1),
+    def test_matching_legacy_model_without_logged_id_fails_before_upload(self):
+        previous, _ = self.package("legacy-no-id")
+        package, _ = self.package("new")
+        with (
+            patch.object(
+                _versions, "_previous_artifact_uri", return_value=str(previous)
+            ),
+            self.assertRaisesRegex(ValueError, "no MLflow logged-model ID"),
         ):
-            path = Path(
-                mlflow.artifacts.download_artifacts(artifact_uri=info.model_uri)
-            )
-            flavor = Model.load(path / "MLmodel").flavors["triton"]
-            self.assertEqual(flavor["model_version"], number)
-            repository = path / flavor["data"]
-            self.assertTrue((repository / str(number) / "requirements.txt").is_file())
-            self.assertFalse((repository / "requirements.txt").exists())
-            self.assertEqual(
-                {p.name for p in repository.iterdir() if p.is_dir()}, {str(number)}
-            )
-            np.testing.assert_array_equal(
-                mlflow.pyfunc.load_model(info.model_uri).predict(values), [1.5, 1.5]
+            _versions.extend_registered_repository(
+                package, model_uri="runs:/legacy/model"
             )
 
-    def test_real_registry_logs_updates_and_config_changes(self):
-        # Arrange: returning to an older config must not resurrect its history.
+    def check_real_updates(self, registered):
         tracking, registry = mlflow.get_tracking_uri(), mlflow.get_registry_uri()
         self.addCleanup(mlflow.set_tracking_uri, tracking)
         self.addCleanup(mlflow.set_registry_uri, registry)
@@ -454,66 +411,150 @@ class RepositoryVersionTests(unittest.TestCase):
         experiment = mlflow.create_experiment(
             "versioning", artifact_location=(self.root / "artifacts").as_uri()
         )
+        client = mlflow.MlflowClient()
         values = np.array([[1.0], [2.0]])
+        # Same config, changed config, same again, then return to the first config.
         cases = [(1, 1), (1, 2), (2, 1), (2, 2), (1, 1)]
-        examples = [np.repeat(values, columns, axis=1) for columns, _ in cases]
-        models = [
-            DummyRegressor(strategy="constant", constant=float(index)).fit(
+        infos, snapshots, runs = [], [], []
+        for index, (columns, number) in enumerate(cases, 1):
+            example = np.repeat(values, columns, axis=1)
+            model = DummyRegressor(strategy="constant", constant=float(index)).fit(
                 example, [0.0, 0.0]
             )
-            for index, example in enumerate(examples, 1)
-        ]
-
-        # Act
-        infos = []
-        with mlflow.start_run(experiment_id=experiment):
-            for model, example in zip(models, examples):
-                infos.append(
-                    sklearn.log_model(
-                        model,
-                        input_example=example,
-                        name="model",
-                        registered_model_name="registered",
-                        pip_requirements=["scikit-learn"],
-                    )
+            history = {"registered_model_name": "registered"} if registered else {}
+            if not registered and infos:
+                history["model_uri"] = infos[-1].model_uri
+            requirements = ["scikit-learn"] + (["numpy"] if index % 2 == 0 else [])
+            with mlflow.start_run(experiment_id=experiment) as run:
+                info = sklearn.log_model(
+                    model,
+                    input_example=example,
+                    pip_requirements=requirements,
+                    **history,
                 )
-
-        # Assert
-        paths, groups = [], []
-        for index, (info, example, (_, expected_version)) in enumerate(
-            zip(infos, examples, cases), 1
-        ):
-            self.assertEqual(str(info.registered_model_version), str(index))
-            path = Path(
-                mlflow.artifacts.download_artifacts(
-                    artifact_uri=f"models:/registered/{index}"
-                )
+                runs.append(run.info.run_id)
+            infos.append(info)
+            self.assertEqual(
+                info.registered_model_version,
+                (index + 1) // 2 if registered else None,
             )
-            paths.append(path)
+            path = Path(
+                mlflow.artifacts.download_artifacts(artifact_uri=info.model_uri)
+            )
             flavor = Model.load(path / "MLmodel").flavors["triton"]
-            groups.append(flavor["repository_group"])
-            self.assertEqual(flavor["model_version"], expected_version)
+            self.assertEqual(flavor["model_version"], number)
             repository = path / flavor["data"]
             self.assertEqual(
-                sorted(p.name for p in repository.iterdir() if p.is_dir()),
-                [str(expected_version)],
-            )
-            self.assertTrue(
-                (repository / str(expected_version) / "requirements.txt").is_file()
+                {p.name for p in repository.iterdir() if p.is_dir()},
+                {str(n) for n in range(1, number + 1)},
             )
             self.assertFalse((repository / "requirements.txt").exists())
-            saved = mlflow.pyfunc.load_model(
-                str(repository / str(expected_version) / "artifact")
+            self.assertEqual(
+                "numpy" in (repository / str(number) / "requirements.txt").read_text(),
+                index % 2 == 0,
             )
-            np.testing.assert_array_equal(saved.predict(example), [index] * 2)
             np.testing.assert_array_equal(
                 mlflow.pyfunc.load_model(info.model_uri).predict(example), [index] * 2
             )
-        self.assertEqual(groups[0], groups[1])
-        self.assertEqual(groups[2], groups[3])
-        self.assertNotEqual(groups[1], groups[2])
-        self.assertNotIn(groups[4], groups[:4])
-        self.assertFalse((paths[0] / "model_repository/model/2").exists())
+            version_path = repository / str(number)
+            snapshots.append(
+                (
+                    version_path,
+                    {
+                        f.relative_to(version_path): f.read_bytes()
+                        for f in version_path.rglob("*")
+                        if f.is_file()
+                    },
+                )
+            )
+            # Each new run is associated with the reused/new model.
+            self.assertIn(
+                info.model_id,
+                [
+                    m.model_id
+                    for m in client.get_run(run.info.run_id).outputs.model_outputs
+                ],
+            )
+
+        self.assertEqual(infos[0].model_id, infos[1].model_id)
+        self.assertEqual(infos[2].model_id, infos[3].model_id)
+        self.assertEqual(len({info.model_id for info in infos}), 3)
+        self.assertEqual(
+            len(client.search_logged_models(experiment_ids=[experiment])), 3
+        )
+        for index, ((version_path, snapshot), (columns, _)) in enumerate(
+            zip(snapshots, cases), 1
+        ):
+            self.assertEqual(
+                {
+                    f.relative_to(version_path): f.read_bytes()
+                    for f in version_path.rglob("*")
+                    if f.is_file()
+                },
+                snapshot,
+            )
+            np.testing.assert_array_equal(
+                mlflow.pyfunc.load_model(str(version_path / "artifact")).predict(
+                    np.repeat(values, columns, axis=1)
+                ),
+                [index] * 2,
+            )
+        versions = client.search_model_versions()
+        self.assertEqual(len(versions), 3 if registered else 0)
+        if registered:
+            for version, info in zip(("1", "2", "3"), (infos[0], infos[2], infos[4])):
+                entry = client.get_model_version("registered", version)
+                self.assertEqual(
+                    mlflow.models.get_model_info(
+                        f"models:/registered/{version}"
+                    ).model_id,
+                    info.model_id,
+                )
+                self.assertEqual(entry.status, "READY")
+            # The existing Registry URI now resolves the latest native weights.
+            np.testing.assert_array_equal(
+                mlflow.pyfunc.load_model("models:/registered/1").predict(values),
+                [2.0] * 2,
+            )
+        else:
+            # Reusing the original URI advances the same model's current metadata.
+            with mlflow.start_run(experiment_id=experiment):
+                fourth = sklearn.log_model(
+                    DummyRegressor(strategy="constant", constant=6.0).fit(
+                        values, [0, 0]
+                    ),
+                    input_example=values,
+                    model_uri=infos[0].model_uri,
+                    pip_requirements=["scikit-learn"],
+                )
+                mlflow.log_metric("update_score", 0.75)
+                repeated = sklearn.log_model(
+                    DummyRegressor(strategy="constant", constant=7.0).fit(
+                        values, [0, 0]
+                    ),
+                    input_example=values,
+                    model_uri=infos[0].model_uri,
+                    pip_requirements=["scikit-learn"],
+                )
+                update_run = mlflow.active_run().info.run_id
+            self.assertEqual(repeated.model_id, fourth.model_id)
+            self.assertEqual(repeated.flavors["triton"]["model_version"], 4)
+            self.assertEqual(len(client.get_run(update_run).outputs.model_outputs), 1)
+            self.assertTrue(
+                any(
+                    metric.key == "update_score" and metric.value == 0.75
+                    for metric in client.get_logged_model(repeated.model_id).metrics
+                )
+            )
+            self.assertEqual(fourth.model_id, infos[0].model_id)
+            self.assertEqual(fourth.flavors["triton"]["model_version"], 3)
+            self.assertTrue((snapshots[0][0].parent / "3/requirements.txt").is_file())
+
+    def test_real_logged_model_history_without_registry(self):
+        self.check_real_updates(registered=False)
+
+    def test_real_registry_logs_updates_and_config_changes(self):
+        self.check_real_updates(registered=True)
 
 
 if __name__ == "__main__":

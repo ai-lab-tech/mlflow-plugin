@@ -55,7 +55,7 @@ def run_smoke(output):
         inputs, targets = load_iris(return_X_y=True, as_frame=True)
         cases = [
             ("original", inputs, 1.0, ["1"]),
-            ("compatible", inputs, 0.05, ["2"]),
+            ("compatible", inputs, 0.05, ["1", "2"]),
             ("incompatible", inputs.iloc[:, :3], 0.05, ["1"]),
         ]
         models = [
@@ -83,7 +83,7 @@ def run_smoke(output):
                         artifact_uri="models:/iris-versioning-smoke/1"
                     )
                 )
-                original_digest = tree_digest(first)
+                original_digest = tree_digest(first / "model_repository/iris/1")
 
         # Assert: read registered artifacts independently of the logging results.
         repositories, rows = [], report["versions"]
@@ -91,11 +91,14 @@ def run_smoke(output):
             cases, 1
         ):
             model, info = models[index - 1], infos[index - 1]
-            uri = f"models:/iris-versioning-smoke/{index}"
-            registered = client.get_model_version("iris-versioning-smoke", str(index))
+            registry_number = 1 if index < 3 else 2
+            uri = f"models:/iris-versioning-smoke/{registry_number}"
+            registered = client.get_model_version(
+                "iris-versioning-smoke", str(registry_number)
+            )
             check(registered.status == "READY", f"{uri}: status is {registered.status}")
             check(
-                str(info.registered_model_version) == str(index),
+                str(info.registered_model_version) == str(registry_number),
                 f"{uri}: wrong Registry version",
             )
             metadata = mlflow.models.get_model_info(uri)
@@ -105,15 +108,16 @@ def run_smoke(output):
             repositories.append(repository)
             versions = sorted(p.name for p in repository.iterdir() if p.is_dir())
             check(
-                versions == expected_versions,
+                versions == (["1", "2"] if index < 3 else ["1"]),
                 f"{case}: expected {expected_versions}, found {versions}",
             )
             check(
-                flavor["model_version"] == int(expected_versions[-1]),
+                flavor["model_version"] == (2 if index < 3 else 1),
                 f"{case}: incorrect Triton flavor version",
             )
             example = features.iloc[20:40]
-            expected = model.predict_proba(example)
+            latest_model = models[1] if index < 3 else model
+            expected = latest_model.predict_proba(example)
             np.testing.assert_allclose(
                 mlflow.pyfunc.load_model(uri).predict(example), expected
             )
@@ -125,7 +129,14 @@ def run_smoke(output):
                 native = mlflow.pyfunc.load_model(
                     str(repository / version / "artifact")
                 )
-                np.testing.assert_allclose(native.predict(example), expected)
+                version_model = models[int(version) - 1] if index < 3 else model
+                np.testing.assert_allclose(
+                    native.predict(example), version_model.predict_proba(example)
+                )
+                check(
+                    (repository / version / "requirements.txt").is_file(),
+                    f"{case}: missing requirements in Triton version {version}",
+                )
             rows.append(
                 {
                     "case": case,
@@ -162,15 +173,16 @@ def run_smoke(output):
             "Incompatible group did not change",
         )
         check(
-            tree_digest(repositories[0].parents[1]) == original_digest,
-            "Original artifact files changed",
+            tree_digest(repositories[0] / "1") == original_digest,
+            "Original Triton version files changed",
         )
-        check(not (repositories[0] / "2").exists(), "Original artifact was modified")
+        check(infos[0].model_id == infos[1].model_id, "Compatible model ID changed")
+        check(infos[1].model_id != infos[2].model_id, "Config change reused model ID")
         registered_versions = client.search_model_versions(
             "name = 'iris-versioning-smoke'"
         )
         check(
-            {str(v.version) for v in registered_versions} == {"1", "2", "3"},
+            {str(v.version) for v in registered_versions} == {"1", "2"},
             "Unexpected Registry versions",
         )
         report.update(
@@ -179,10 +191,10 @@ def run_smoke(output):
                 "changed_weights",
                 "config_equality",
                 "config_change",
-                "only_current_version_packaged",
-                "original_unchanged",
+                "compatible_update_preserves_model_id",
+                "original_triton_version_unchanged",
                 "native_and_packaged_predictions",
-                "three_ready_registry_versions",
+                "two_ready_registry_versions",
             ],
         )
         return report

@@ -34,7 +34,7 @@ class SmokeTests(unittest.TestCase):
             self.assertEqual(report["status"], "passed")
             self.assertEqual(
                 [row["triton_versions"] for row in report["versions"]],
-                [["1"], ["2"], ["1"]],
+                [["1", "2"], ["1", "2"], ["1"]],
             )
 
     def test_optimized_smoke_rejects_missing_backend_and_records_failure(self):
@@ -49,7 +49,7 @@ import smoke_versioning
 original = smoke_versioning.mlflow.artifacts.download_artifacts
 def download(*args, **kwargs):
     result = original(*args, **kwargs)
-    if kwargs.get("artifact_uri") == "models:/iris-versioning-smoke/3":
+    if kwargs.get("artifact_uri") == "models:/iris-versioning-smoke/2":
         (Path(result) / "model_repository/iris/1/model.py").unlink()
     return result
 with patch.object(smoke_versioning.mlflow.artifacts, "download_artifacts", download):

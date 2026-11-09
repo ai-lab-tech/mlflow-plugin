@@ -64,10 +64,10 @@ class LoggingWrapperTests(unittest.TestCase):
                 wrapper.log_model(
                     object(),
                     input_example=self.example,
-                    previous_model_uri="models:/m-123",
+                    model_uri="models:/m-123",
                 )
                 self.assertEqual(
-                    log.call_args.kwargs["previous_model_uri"], "models:/m-123"
+                    log.call_args.kwargs["model_uri"], "models:/m-123"
                 )
 
     def test_conflicting_history_parameters_fail_before_preparing_or_logging(self):
@@ -83,7 +83,7 @@ class LoggingWrapperTests(unittest.TestCase):
                     object(),
                     input_example=self.example,
                     registered_model_name="registered",
-                    previous_model_uri="models:/m-123",
+                    model_uri="models:/m-123",
                 )
             prepare.assert_not_called()
             extend.assert_not_called()
