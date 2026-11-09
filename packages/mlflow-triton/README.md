@@ -162,7 +162,7 @@ dependencies or configure serialization.
 | Argument | Framework | Default / purpose |
 | --- | --- | --- |
 | `code_paths` | All | `None`. Local inference-code files or directories to bundle. Preserve their importable package structure. |
-| `pip_requirements` | All | `None`. Requirements list or file path; otherwise uses MLflow's default framework dependencies. |
+| `pip_requirements` | All | `None`. Requirements list or file path; otherwise combines MLflow's framework defaults with dependencies observed during the example prediction. |
 | `extra_pip_requirements` | All | `None`. Add dependencies to the default or inferred requirements. |
 | `conda_env` | All | `None`. Environment dictionary or file path. Follow MLflow's restrictions on combining environment arguments. |
 | `pyfunc_predict_fn` | sklearn | `"predict"`. Prediction method, for example `"predict_proba"`. Also determines the output used to infer the signature. |
@@ -240,6 +240,20 @@ Generated directory layout:
     model.py
     artifact/         # Self-contained MLflow model, code and assets
 ```
+
+By default, dependencies are observed during the existing in-memory example
+prediction, including packages referenced through already-imported modules and
+cached callables. Observed distributions are pinned to their installed versions
+and combined with MLflow's framework defaults; the backend's NumPy and pandas
+dependencies are included too. This does not reload the model, copy weights, or
+export the entire training environment. Installed packages with matching versions
+can be reused in the Triton image.
+
+Capture is sample-based and runs on the prediction thread. Add dependencies for
+unexercised paths or work in other threads/processes with `extra_pip_requirements`.
+Bundled local code still requires `code_paths`. Explicit `pip_requirements` and
+`conda_env` bypass capture. With `validate_saved_model=True`, native MLflow
+dependency inference applies instead, and may reload the model in a subprocess.
 
 The serving `requirements.txt` is standalone: requirements and constraints from
 MLflow's saved environment are combined into package requirements, without `-r`
