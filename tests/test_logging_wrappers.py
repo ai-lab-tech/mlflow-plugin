@@ -66,9 +66,7 @@ class LoggingWrapperTests(unittest.TestCase):
                     input_example=self.example,
                     model_uri="models:/m-123",
                 )
-                self.assertEqual(
-                    log.call_args.kwargs["model_uri"], "models:/m-123"
-                )
+                self.assertEqual(log.call_args.kwargs["model_uri"], "models:/m-123")
 
     def test_conflicting_history_parameters_fail_before_preparing_or_logging(self):
         for wrapper in (sklearn, pytorch, transformers):

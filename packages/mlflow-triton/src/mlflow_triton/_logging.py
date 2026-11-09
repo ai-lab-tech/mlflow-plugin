@@ -379,9 +379,7 @@ def log_native_model(
     **save_kwargs,
 ):
     if registered_model_name is not None and model_uri is not None:
-        raise ValueError(
-            "registered_model_name and model_uri are mutually exclusive"
-        )
+        raise ValueError("registered_model_name and model_uri are mutually exclusive")
     with tempfile.TemporaryDirectory(prefix="mlflow-triton-log-") as temporary:
         prepared = Path(temporary) / "prepared"
         prepare_model(

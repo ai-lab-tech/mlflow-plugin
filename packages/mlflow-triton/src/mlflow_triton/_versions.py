@@ -127,9 +127,7 @@ def extend_registered_repository(
     the logged model and registration. Serialize calls per model/history.
     """
     if registered_model_name is not None and model_uri is not None:
-        raise ValueError(
-            "registered_model_name and model_uri are mutually exclusive"
-        )
+        raise ValueError("registered_model_name and model_uri are mutually exclusive")
     metadata = Model.load(prepared / "MLmodel")
     flavor = metadata.flavors["triton"]
     repository = prepared / flavor["data"]
