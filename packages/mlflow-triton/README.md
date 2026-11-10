@@ -81,6 +81,42 @@ are stored at `info.model_uri`; no additional save or load call is needed.
 `info.registered_model_version` identifies the Registry version when requested.
 Logging does not start Triton or deploy a service.
 
+## Register a model after training
+
+Use the plugin's `register_model()` to apply the same Triton version rules as
+`log_model(..., registered_model_name=...)` after logging and selecting a model:
+
+```python
+from mlflow_triton import register_model, sklearn
+
+info = sklearn.log_model(
+    fitted_pipeline,
+    name="classifier",
+    input_example=X_sample,
+)
+version = register_model(info.model_uri, "classifier")
+print(version.version)  # MLflow Registry version, not the Triton directory number
+```
+
+- First registration: register the logged model with Triton directory `1/`.
+- Matching `config.pbtxt`: append `2/`, `3/`, ... to the existing registered
+  model, reusing its MLflow model ID and Registry version. Its root native model
+  is updated to the selected weights; earlier Triton directories stay intact.
+- Changed configuration: create a new Registry version starting at `1/`.
+
+The return value is MLflow `ModelVersion`. Arguments are `model_uri`, `name`,
+`await_registration_for=300`, and optional keyword-only `tags`. Models without
+a Triton flavor use standard MLflow registration. Calls for one registered name
+must run sequentially. Source model references support logged-model IDs,
+Registry versions/aliases, and run URIs. Registration copies the selected source
+artifacts without loading or retraining the model. Earlier source Triton
+versions and predecessor weights are not downloaded or copied.
+
+**Use `mlflow_triton.register_model`, not `mlflow.register_model`, for this behavior.**
+MLflow's own function and **Register Model in the UI** create Registry versions
+without running this plugin's Triton config comparison or incrementing Triton
+numbers. This package does not install a server-side registration hook.
+
 ## Log API reference
 
 Pass the model positionally or by the parameter name below. All other arguments

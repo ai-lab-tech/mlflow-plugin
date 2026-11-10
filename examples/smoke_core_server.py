@@ -290,6 +290,42 @@ class CoreServerSmokeTests(unittest.TestCase):
         aliased = mlflow.pyfunc.load_model(f"models:/{registered_name}@champion")
         np.testing.assert_array_equal(aliased.predict(example), model.predict(example))
 
+    def test_sklearn_plugin_registration_uses_existing_version_rules(self):
+        from mlflow_triton import register_model, sklearn
+
+        first_model, example = self.iris()
+        first = sklearn.log_model(
+            first_model, input_example=example, name="iris", run_id=self.run_id
+        )
+        version = register_model(first.model_uri, "http-plugin-registered")
+        self.assertEqual(str(version.version), "1")
+        updated, _ = self.iris(regularization=0.05)
+        second = sklearn.log_model(
+            updated, input_example=example, name="iris", run_id=self.run_id
+        )
+        version = register_model(second.model_uri, "http-plugin-registered")
+        self.assertEqual(str(version.version), "1")
+        _, repository = self.verify_model(
+            first, example, updated.predict(example), "sklearn", "iris"
+        )
+        self.assertEqual(
+            {p.name for p in repository.iterdir() if p.is_dir()}, {"1", "2"}
+        )
+        old = mlflow.pyfunc.load_model(str(repository / "1/artifact"))
+        np.testing.assert_array_equal(
+            old.predict(example), first_model.predict(example)
+        )
+        changed, changed_example = self.iris(columns=3)
+        third = sklearn.log_model(
+            changed, input_example=changed_example, name="iris", run_id=self.run_id
+        )
+        version = register_model(third.model_uri, "http-plugin-registered")
+        self.assertEqual(str(version.version), "2")
+        _, repository = self.verify_model(
+            third, changed_example, changed.predict(changed_example), "sklearn", "iris"
+        )
+        self.assertEqual({p.name for p in repository.iterdir() if p.is_dir()}, {"1"})
+
     def test_sklearn_update_after_separate_registration(self):
         from mlflow_triton import sklearn
 

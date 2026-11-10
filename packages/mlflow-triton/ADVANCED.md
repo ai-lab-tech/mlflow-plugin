@@ -148,6 +148,25 @@ is no distributed lock. Artifact uploads are not transactional: a failed upload
 can leave partial files and MLflow may mark the model failed. Earlier numeric
 version directories are not overwritten by the update.
 
+### Separate registration
+
+`mlflow_triton.register_model(model_uri, name)` stages the selected source's
+native package and current Triton directory, then calls the same
+`extend_registered_repository` and compatible artifact-update path as the
+logging wrappers. This does not change the log API or its versioning rules.
+The source is copied into temporary staging before any directory renaming.
+Only the selected source version is copied; older source directories and
+predecessor weights remain in storage.
+
+Matching configs append a Triton directory and return the existing Registry
+`ModelVersion`; changed configs register a new version. A source already carrying
+a Triton number greater than one is repackaged at `1/` in a new logged model
+when starting a different history, leaving the source unchanged. Model weights
+are not loaded or retrained. Optional `tags` apply to the returned Registry version.
+
+Native `mlflow.register_model` and UI registration bypass this Python helper.
+They keep standard MLflow behavior and do not increment Triton numbers.
+
 ## Disk space and concurrent loading
 
 Logging creates two copies of the model: the MLflow model and a self-contained
