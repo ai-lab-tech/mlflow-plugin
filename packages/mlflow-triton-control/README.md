@@ -116,7 +116,3 @@ mlflow deployments create --target triton-control \
 
 Set `MODEL_URI` to the logged model's `info.model_uri` and replace
 `your-triton-image` with your serving image.
-
-Serving requirements are read from `<model_version>/requirements.txt` (version 1
-when legacy metadata omits the number). Older artifacts with requirements next to
-`config.pbtxt` remain supported as a fallback.

@@ -21,7 +21,6 @@ def log_model(
     device: Literal["cpu", "gpu"] = "cpu",
     validate_saved_model: bool = False,
     registered_model_name: str | None = None,
-    model_uri: str | None = None,
     await_registration_for: int = 300,
     run_id: str | None = None,
     metadata: dict[str, Any] | None = None,
@@ -35,9 +34,6 @@ def log_model(
     ``device`` selects the Triton target. Validation reuses the supplied model
     on its current device. ``validate_saved_model=True`` instead reloads the
     saved artifact on CPU for validation, requiring memory for another copy.
-    ``model_uri`` selects explicit history without registration and
-    cannot be combined with ``registered_model_name``. Serving
-    requirements are stored inside the numeric Triton version directory.
     Remaining kwargs go to the native MLflow save_model API. See the core
     README's API reference for framework-specific options and limitations.
     """
@@ -52,7 +48,6 @@ def log_model(
         device=device,
         validate_saved_model=validate_saved_model,
         registered_model_name=registered_model_name,
-        model_uri=model_uri,
         await_registration_for=await_registration_for,
         run_id=run_id,
         metadata=metadata,

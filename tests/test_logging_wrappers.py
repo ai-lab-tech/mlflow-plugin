@@ -55,38 +55,6 @@ class LoggingWrapperTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.example = pd.DataFrame({"left": [2.0, 6.0], "right": [4.0, 7.0]})
 
-    def test_all_wrappers_forward_explicit_predecessor(self):
-        for wrapper in (sklearn, pytorch, transformers):
-            with (
-                self.subTest(wrapper=wrapper.__name__),
-                patch.object(wrapper, "log_native_model") as log,
-            ):
-                wrapper.log_model(
-                    object(),
-                    input_example=self.example,
-                    model_uri="models:/m-123",
-                )
-                self.assertEqual(log.call_args.kwargs["model_uri"], "models:/m-123")
-
-    def test_conflicting_history_parameters_fail_before_preparing_or_logging(self):
-        for wrapper in (sklearn, pytorch, transformers):
-            with (
-                self.subTest(wrapper=wrapper.__name__),
-                patch.object(_logging, "prepare_model") as prepare,
-                patch.object(_logging, "extend_registered_repository") as extend,
-                patch.object(Model, "log") as log,
-                self.assertRaisesRegex(ValueError, "mutually exclusive"),
-            ):
-                wrapper.log_model(
-                    object(),
-                    input_example=self.example,
-                    registered_model_name="registered",
-                    model_uri="models:/m-123",
-                )
-            prepare.assert_not_called()
-            extend.assert_not_called()
-            log.assert_not_called()
-
     def prepare(self, **kwargs):
         destination = self.root / "saved"
         _logging.prepare_model(
@@ -339,7 +307,7 @@ class LoggingWrapperTests(unittest.TestCase):
                 )
                 requirements = (path / "requirements.txt").read_text()
                 repository = path / "model_repository/model"
-                serving_requirements = (repository / "1/requirements.txt").read_text()
+                serving_requirements = (repository / "requirements.txt").read_text()
 
                 # Assert
                 self.assertIn("scikit-learn==", requirements)

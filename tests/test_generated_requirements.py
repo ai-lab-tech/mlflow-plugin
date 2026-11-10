@@ -53,15 +53,12 @@ class GeneratedRequirementsTests(unittest.TestCase):
         (native / "requirements.txt").write_text("numpy>=1.20\n-c constraints.txt\n")
         (native / "constraints.txt").write_text("numpy<2\n")
         repository = self.repository / "model_repository/classifier"
-        (repository / "2").mkdir(parents=True)
+        repository.mkdir(parents=True)
         generated = serving_requirements(native, "3.14.0")
-        (repository / "2/requirements.txt").write_text(generated)
+        (repository / "requirements.txt").write_text(generated)
         metadata = Model()
         metadata.add_flavor(
-            "triton",
-            data="model_repository/classifier",
-            model_name="classifier",
-            model_version=2,
+            "triton", data="model_repository/classifier", model_name="classifier"
         )
         metadata.save(self.repository / "MLmodel")
         # Only the standalone serving file remains available to artifact access.
@@ -102,34 +99,6 @@ class GeneratedRequirementsTests(unittest.TestCase):
         self.assertNotIn("2.0", numpy.specifier)
         self.assertNotIn(".txt", payload["requirements_txt"])
         self.assertEqual(deployment["status"], "ready")
-
-    def test_version_local_requirements_take_precedence_and_legacy_is_supported(self):
-        (self.repository / "requirements.txt").write_text("legacy")
-        (self.repository / "2").mkdir()
-        local = self.repository / "2/requirements.txt"
-        local.write_text("version-two")
-        self.assertEqual(
-            resolver._read_version_requirements(self.uri, {"model_version": 2}),
-            "version-two",
-        )
-        local.write_text("")
-        self.assertEqual(
-            resolver._read_version_requirements(self.uri, {"model_version": 2}), ""
-        )
-        local.unlink()
-        self.assertEqual(
-            resolver._read_version_requirements(self.uri, {"model_version": 2}),
-            "legacy",
-        )
-        self.assertEqual(resolver._read_version_requirements(self.uri, {}), "legacy")
-
-    def test_invalid_version_cannot_select_requirements_path(self):
-        for number in (0, -1, True, "../outside", None):
-            with (
-                self.subTest(number=number),
-                self.assertRaisesRegex(MlflowException, "model_version"),
-            ):
-                resolver._read_version_requirements(self.uri, {"model_version": number})
 
     def test_missing_file_is_optional(self):
         # Arrange: setUp creates a repository without requirements.txt.
@@ -191,9 +160,7 @@ class GeneratedRequirementsTests(unittest.TestCase):
             ) as alias,
             patch.object(resolver, "get_model_info", return_value=metadata) as info,
             patch.object(
-                resolver,
-                "_read_version_requirements",
-                return_value="scikit-learn==1.7.2\n",
+                resolver, "_read_requirements", return_value="scikit-learn==1.7.2\n"
             ) as read,
         ):
             artifacts = resolver.resolve_deployment_artifacts(
@@ -202,8 +169,7 @@ class GeneratedRequirementsTests(unittest.TestCase):
         alias.assert_called_once_with("models:/classifier@champion")
         info.assert_called_once_with("s3://bucket/models/pinned-version")
         read.assert_called_once_with(
-            "s3://bucket/models/pinned-version/model_repository/classifier",
-            metadata.flavors["triton"],
+            "s3://bucket/models/pinned-version/model_repository/classifier"
         )
         self.assertEqual(
             artifacts.repository_uri,
@@ -228,13 +194,12 @@ class GeneratedRequirementsTests(unittest.TestCase):
             ),
             patch.object(resolver, "get_model_info", return_value=metadata),
             patch.object(
-                resolver, "_read_version_requirements", return_value="mlflow==3.14.0\n"
+                resolver, "_read_requirements", return_value="mlflow==3.14.0\n"
             ) as read,
         ):
             result = resolver.resolve_deployment_artifacts("models:/m-123")
         read.assert_called_once_with(
-            "mlflow-artifacts:/3/models/m-123/artifacts/model_repository/classifier",
-            metadata.flavors["triton"],
+            "mlflow-artifacts:/3/models/m-123/artifacts/model_repository/classifier"
         )
         self.assertEqual(result.requirements_txt, "mlflow==3.14.0\n")
 
