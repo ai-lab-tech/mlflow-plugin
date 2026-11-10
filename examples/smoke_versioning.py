@@ -55,7 +55,7 @@ def run_smoke(output):
         inputs, targets = load_iris(return_X_y=True, as_frame=True)
         cases = [
             ("original", inputs, 1.0, ["1"]),
-            ("compatible", inputs, 0.05, ["1", "2"]),
+            ("compatible", inputs, 0.05, ["2"]),
             ("incompatible", inputs.iloc[:, :3], 0.05, ["1"]),
         ]
         models = [
@@ -91,7 +91,7 @@ def run_smoke(output):
             cases, 1
         ):
             model, info = models[index - 1], infos[index - 1]
-            registry_number = 1 if index < 3 else 2
+            registry_number = index
             uri = f"models:/iris-versioning-smoke/{registry_number}"
             registered = client.get_model_version(
                 "iris-versioning-smoke", str(registry_number)
@@ -108,16 +108,15 @@ def run_smoke(output):
             repositories.append(repository)
             versions = sorted(p.name for p in repository.iterdir() if p.is_dir())
             check(
-                versions == (["1", "2"] if index < 3 else ["1"]),
+                versions == expected_versions,
                 f"{case}: expected {expected_versions}, found {versions}",
             )
             check(
-                flavor["model_version"] == (2 if index < 3 else 1),
+                flavor["model_version"] == (2 if index == 2 else 1),
                 f"{case}: incorrect Triton flavor version",
             )
             example = features.iloc[20:40]
-            latest_model = models[1] if index < 3 else model
-            expected = latest_model.predict_proba(example)
+            expected = model.predict_proba(example)
             np.testing.assert_allclose(
                 mlflow.pyfunc.load_model(uri).predict(example), expected
             )
@@ -129,7 +128,7 @@ def run_smoke(output):
                 native = mlflow.pyfunc.load_model(
                     str(repository / version / "artifact")
                 )
-                version_model = models[int(version) - 1] if index < 3 else model
+                version_model = model
                 np.testing.assert_allclose(
                     native.predict(example), version_model.predict_proba(example)
                 )
@@ -176,13 +175,15 @@ def run_smoke(output):
             tree_digest(repositories[0] / "1") == original_digest,
             "Original Triton version files changed",
         )
-        check(infos[0].model_id == infos[1].model_id, "Compatible model ID changed")
+        check(
+            infos[0].model_id != infos[1].model_id, "Compatible update reused model ID"
+        )
         check(infos[1].model_id != infos[2].model_id, "Config change reused model ID")
         registered_versions = client.search_model_versions(
             "name = 'iris-versioning-smoke'"
         )
         check(
-            {str(v.version) for v in registered_versions} == {"1", "2"},
+            {str(v.version) for v in registered_versions} == {"1", "2", "3"},
             "Unexpected Registry versions",
         )
         report.update(
@@ -191,10 +192,10 @@ def run_smoke(output):
                 "changed_weights",
                 "config_equality",
                 "config_change",
-                "compatible_update_preserves_model_id",
+                "compatible_update_creates_model_id",
                 "original_triton_version_unchanged",
                 "native_and_packaged_predictions",
-                "two_ready_registry_versions",
+                "three_ready_registry_versions",
             ],
         )
         return report

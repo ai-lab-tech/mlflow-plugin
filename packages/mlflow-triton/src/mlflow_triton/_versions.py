@@ -70,7 +70,7 @@ def _repository_data(flavor):
 
 
 def _advance_compatible_version(repository, source, previous_flavor):
-    """Prepare only the new directory; older directories remain in remote storage."""
+    """Number only the new package; earlier registered artifacts stay untouched."""
     with TemporaryDirectory(prefix="mlflow-triton-config-") as temporary:
         config = Path(
             mlflow.artifacts.download_artifacts(
@@ -121,10 +121,10 @@ def _previous_artifact_uri(uri):
 def extend_registered_repository(
     prepared, registered_model_name=None, *, model_uri=None
 ):
-    """Prepare an append and return its existing model identity, or None for new models.
+    """Number a new package and return matching predecessor metadata when available.
 
-    The two history parameters are mutually exclusive. Matching configs reuse
-    the logged model and registration. Serialize calls per model/history.
+    The two history parameters are mutually exclusive. Matching configurations
+    share a repository group and advance numbering; the predecessor is read-only.
     """
     if registered_model_name is not None and model_uri is not None:
         raise ValueError("registered_model_name and model_uri are mutually exclusive")

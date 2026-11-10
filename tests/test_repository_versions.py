@@ -1,4 +1,4 @@
-"""Compatible updates append to the same model; config changes start a new model."""
+"""Every logging call creates a snapshot; compatible configs advance Triton numbers."""
 
 import shutil
 import tempfile
@@ -436,7 +436,7 @@ class RepositoryVersionTests(unittest.TestCase):
             infos.append(info)
             self.assertEqual(
                 info.registered_model_version,
-                (index + 1) // 2 if registered else None,
+                index if registered else None,
             )
             path = Path(
                 mlflow.artifacts.download_artifacts(artifact_uri=info.model_uri)
@@ -446,7 +446,7 @@ class RepositoryVersionTests(unittest.TestCase):
             repository = path / flavor["data"]
             self.assertEqual(
                 {p.name for p in repository.iterdir() if p.is_dir()},
-                {str(n) for n in range(1, number + 1)},
+                {str(number)},
             )
             self.assertFalse((repository / "requirements.txt").exists())
             self.assertEqual(
@@ -467,7 +467,7 @@ class RepositoryVersionTests(unittest.TestCase):
                     },
                 )
             )
-            # Each new run is associated with the reused/new model.
+            # Each run is associated with its own model snapshot.
             self.assertIn(
                 info.model_id,
                 [
@@ -476,11 +476,11 @@ class RepositoryVersionTests(unittest.TestCase):
                 ],
             )
 
-        self.assertEqual(infos[0].model_id, infos[1].model_id)
-        self.assertEqual(infos[2].model_id, infos[3].model_id)
-        self.assertEqual(len({info.model_id for info in infos}), 3)
+        self.assertNotEqual(infos[0].model_id, infos[1].model_id)
+        self.assertNotEqual(infos[2].model_id, infos[3].model_id)
+        self.assertEqual(len({info.model_id for info in infos}), 5)
         self.assertEqual(
-            len(client.search_logged_models(experiment_ids=[experiment])), 3
+            len(client.search_logged_models(experiment_ids=[experiment])), 5
         )
         for index, ((version_path, snapshot), (columns, _)) in enumerate(
             zip(snapshots, cases), 1
@@ -500,10 +500,10 @@ class RepositoryVersionTests(unittest.TestCase):
                 [index] * 2,
             )
         versions = client.search_model_versions()
-        self.assertEqual(len(versions), 3 if registered else 0)
+        self.assertEqual(len(versions), 5 if registered else 0)
         if registered:
-            for version, info in zip(("1", "2", "3"), (infos[0], infos[2], infos[4])):
-                entry = client.get_model_version("registered", version)
+            for version, info in enumerate(infos, 1):
+                entry = client.get_model_version("registered", str(version))
                 self.assertEqual(
                     mlflow.models.get_model_info(
                         f"models:/registered/{version}"
@@ -511,13 +511,13 @@ class RepositoryVersionTests(unittest.TestCase):
                     info.model_id,
                 )
                 self.assertEqual(entry.status, "READY")
-            # The existing Registry URI now resolves the latest native weights.
+            # Existing Registry versions retain their original weights.
             np.testing.assert_array_equal(
                 mlflow.pyfunc.load_model("models:/registered/1").predict(values),
-                [2.0] * 2,
+                [1.0] * 2,
             )
         else:
-            # Reusing the original URI advances the same model's current metadata.
+            # Branching from the original URI creates new, independent models.
             with mlflow.start_run(experiment_id=experiment):
                 fourth = sklearn.log_model(
                     DummyRegressor(strategy="constant", constant=6.0).fit(
@@ -537,18 +537,18 @@ class RepositoryVersionTests(unittest.TestCase):
                     pip_requirements=["scikit-learn"],
                 )
                 update_run = mlflow.active_run().info.run_id
-            self.assertEqual(repeated.model_id, fourth.model_id)
-            self.assertEqual(repeated.flavors["triton"]["model_version"], 4)
-            self.assertEqual(len(client.get_run(update_run).outputs.model_outputs), 1)
+            self.assertNotEqual(repeated.model_id, fourth.model_id)
+            self.assertEqual(repeated.flavors["triton"]["model_version"], 2)
+            self.assertEqual(len(client.get_run(update_run).outputs.model_outputs), 2)
             self.assertTrue(
                 any(
                     metric.key == "update_score" and metric.value == 0.75
                     for metric in client.get_logged_model(repeated.model_id).metrics
                 )
             )
-            self.assertEqual(fourth.model_id, infos[0].model_id)
-            self.assertEqual(fourth.flavors["triton"]["model_version"], 3)
-            self.assertTrue((snapshots[0][0].parent / "3/requirements.txt").is_file())
+            self.assertNotEqual(fourth.model_id, infos[0].model_id)
+            self.assertEqual(fourth.flavors["triton"]["model_version"], 2)
+            self.assertFalse((snapshots[0][0].parent / "2").exists())
 
     def test_real_logged_model_history_without_registry(self):
         self.check_real_updates(registered=False)

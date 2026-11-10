@@ -83,7 +83,10 @@ def register_model(model_uri, name, await_registration_for=300, *, tags=None):
         if target_number == number:
             # No renumbering is needed, so registration can reference the source.
             return mlflow.register_model(
-                stable_uri, name, await_registration_for=await_registration_for, tags=tags
+                stable_uri,
+                name,
+                await_registration_for=await_registration_for,
+                tags=tags,
             )
         if info.model_id and not _is_registered(client, info.model_id, source):
             # A fresh, unregistered training output keeps its own model ID.
@@ -91,7 +94,10 @@ def register_model(model_uri, name, await_registration_for=300, *, tags=None):
             _logging._log_update(prepared, RepositoryUpdate(info.model_id), info.run_id)
             get_artifact_repository(source).delete_artifacts(data + "/" + str(number))
             return mlflow.register_model(
-                stable_uri, name, await_registration_for=await_registration_for, tags=tags
+                stable_uri,
+                name,
+                await_registration_for=await_registration_for,
+                tags=tags,
             )
         # A source already referenced by Registry versions stays unchanged.
         logged = Model.log(
@@ -117,7 +123,8 @@ def _is_registered(client, model_id, source):
         versions = client.search_model_versions(max_results=100, page_token=page_token)
         for version in versions:
             if getattr(version, "model_id", None) == model_id or version.source in {
-                source, f"models:/{model_id}"
+                source,
+                f"models:/{model_id}",
             }:
                 return True
             # Legacy registrations can use runs:/ references without model_id.

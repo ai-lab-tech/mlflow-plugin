@@ -255,13 +255,12 @@ class CoreServerSmokeTests(unittest.TestCase):
         # Assert
         groups = []
         for index, (info, (model, example), versions) in enumerate(
-            zip(infos, cases, (["1", "2"], ["1", "2"], ["1"])), 1
+            zip(infos, cases, (["1"], ["2"], ["1"])), 1
         ):
-            latest = cases[1][0] if index < 3 else model
             _, repository = self.verify_model(
-                info, example, latest.predict(example), "sklearn", "iris"
+                info, example, model.predict(example), "sklearn", "iris"
             )
-            registry_version = 1 if index < 3 else 2
+            registry_version = index
             registered = self.client.get_model_version(
                 registered_name, str(registry_version)
             )
@@ -277,16 +276,16 @@ class CoreServerSmokeTests(unittest.TestCase):
             )
         self.assertEqual(groups[0], groups[1])
         self.assertNotEqual(groups[1], groups[2])
-        self.assertEqual(infos[0].model_id, infos[1].model_id)
+        self.assertNotEqual(infos[0].model_id, infos[1].model_id)
         self.assertNotEqual(infos[1].model_id, infos[2].model_id)
         self.assertEqual(
-            len(self.client.search_model_versions(f"name = '{registered_name}'")), 2
+            len(self.client.search_model_versions(f"name = '{registered_name}'")), 3
         )
-        # Existing Registry URIs and aliases resolve the latest compatible weights.
-        model, example = cases[1]
+        # Existing Registry URIs and aliases preserve their original weights.
+        model, example = cases[0]
         original = mlflow.pyfunc.load_model(f"models:/{registered_name}/1")
         np.testing.assert_array_equal(original.predict(example), model.predict(example))
-        model, example = cases[1]
+        model, example = cases[0]
         aliased = mlflow.pyfunc.load_model(f"models:/{registered_name}@champion")
         np.testing.assert_array_equal(aliased.predict(example), model.predict(example))
 
@@ -304,14 +303,12 @@ class CoreServerSmokeTests(unittest.TestCase):
             updated, input_example=example, name="iris", run_id=self.run_id
         )
         version = register_model(second.model_uri, "http-plugin-registered")
-        self.assertEqual(str(version.version), "1")
+        self.assertEqual(str(version.version), "2")
         _, repository = self.verify_model(
-            first, example, updated.predict(example), "sklearn", "iris"
+            second, example, updated.predict(example), "sklearn", "iris"
         )
-        self.assertEqual(
-            {p.name for p in repository.iterdir() if p.is_dir()}, {"1", "2"}
-        )
-        old = mlflow.pyfunc.load_model(str(repository / "1/artifact"))
+        self.assertEqual({p.name for p in repository.iterdir() if p.is_dir()}, {"2"})
+        old = mlflow.pyfunc.load_model(first.model_uri)
         np.testing.assert_array_equal(
             old.predict(example), first_model.predict(example)
         )
@@ -320,7 +317,7 @@ class CoreServerSmokeTests(unittest.TestCase):
             changed, input_example=changed_example, name="iris", run_id=self.run_id
         )
         version = register_model(third.model_uri, "http-plugin-registered")
-        self.assertEqual(str(version.version), "2")
+        self.assertEqual(str(version.version), "3")
         _, repository = self.verify_model(
             third, changed_example, changed.predict(changed_example), "sklearn", "iris"
         )
@@ -329,7 +326,7 @@ class CoreServerSmokeTests(unittest.TestCase):
     def test_sklearn_update_after_separate_registration(self):
         from mlflow_triton import sklearn
 
-        # A model registered after logging must also keep its existing identity.
+        # A separately registered predecessor must remain unchanged.
         model, example = self.iris()
         previous = sklearn.log_model(
             model, input_example=example, name="iris", run_id=self.run_id
@@ -350,17 +347,13 @@ class CoreServerSmokeTests(unittest.TestCase):
         _, repository = self.verify_model(
             info, example, updated.predict(example), "sklearn", "iris"
         )
-        self.assertEqual(str(info.registered_model_version), "1")
-        self.assertEqual(info.model_id, previous.model_id)
-        self.assertEqual(
-            {p.name for p in repository.iterdir() if p.is_dir()}, {"1", "2"}
-        )
+        self.assertEqual(str(info.registered_model_version), "2")
+        self.assertNotEqual(info.model_id, previous.model_id)
+        self.assertEqual({p.name for p in repository.iterdir() if p.is_dir()}, {"2"})
         original = mlflow.pyfunc.load_model(f"models:/{registered_name}/1")
-        np.testing.assert_array_equal(
-            original.predict(example), updated.predict(example)
-        )
+        np.testing.assert_array_equal(original.predict(example), model.predict(example))
 
-    def test_sklearn_explicit_uri_reuses_model_and_preserves_versions(self):
+    def test_sklearn_explicit_uri_creates_model_and_preserves_predecessor(self):
         from mlflow_triton import sklearn
 
         model, example = self.iris()
@@ -375,15 +368,13 @@ class CoreServerSmokeTests(unittest.TestCase):
             run_id=self.run_id,
             model_uri=first.model_uri,
         )
-        self.assertEqual(first.model_id, second.model_id)
+        self.assertNotEqual(first.model_id, second.model_id)
         self.assertIsNone(second.registered_model_version)
         _, repository = self.verify_model(
             second, example, updated.predict(example), "sklearn", "iris"
         )
-        self.assertEqual(
-            {p.name for p in repository.iterdir() if p.is_dir()}, {"1", "2"}
-        )
-        old = mlflow.pyfunc.load_model(str(repository / "1/artifact"))
+        self.assertEqual({p.name for p in repository.iterdir() if p.is_dir()}, {"2"})
+        old = mlflow.pyfunc.load_model(first.model_uri)
         np.testing.assert_array_equal(old.predict(example), model.predict(example))
         changed, new_example = self.iris(columns=3)
         third = sklearn.log_model(
@@ -400,7 +391,7 @@ class CoreServerSmokeTests(unittest.TestCase):
         self.assertEqual({p.name for p in repository.iterdir() if p.is_dir()}, {"1"})
         self.assertEqual(
             len(self.client.search_logged_models(experiment_ids=[self.experiment_id])),
-            2,
+            3,
         )
 
     def test_sklearn_invalid_inputs_do_not_publish_models(self):

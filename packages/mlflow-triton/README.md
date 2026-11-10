@@ -33,7 +33,7 @@ info = sklearn.log_model(
     fitted_pipeline,
     name="classifier",
     input_example=example_dataframe,
-    registered_model_name="classifier",  # Optional: select/register this model
+    registered_model_name="classifier",  # Optional: create a Registry version
 )
 print(info.model_uri)
 ```
@@ -98,11 +98,20 @@ version = register_model(info.model_uri, "classifier")
 print(version.version)  # MLflow Registry version, not the Triton directory number
 ```
 
-- First registration: register the logged model with Triton directory `1/`.
-- Matching `config.pbtxt`: append `2/`, `3/`, ... to the existing registered
-  model, reusing its MLflow model ID and Registry version. Its root native model
-  is updated to the selected weights; earlier Triton directories stay intact.
-- Changed configuration: create a new Registry version starting at `1/`.
+Every call creates a **new MLflow Registry version**. Existing registered
+models and their weights remain unchanged.
+
+- First registration: Registry version 1 with Triton directory `1/`.
+- Matching `config.pbtxt`: Registry version 2 with its own Triton directory
+  `2/`, then Registry version 3 with `3/`, and so on.
+- Changed configuration: a new Registry version with Triton directory `1/`.
+
+Each registered snapshot contains only its own Triton directory. For a fresh,
+unregistered training output, registration renumbers that output's serving
+directory before registering it, retaining its model ID and source run. This
+requires artifact deletion support and permission to remove the old numbered
+directory. If the source is already registered elsewhere, a new logged snapshot
+is created instead, so existing Registry references keep their original weights.
 
 The return value is MLflow `ModelVersion`. Arguments are `model_uri`, `name`,
 `await_registration_for=300`, and optional keyword-only `tags`. Models without
@@ -143,7 +152,7 @@ artifact and generated request files, so use non-sensitive examples.
 | `device` | `"cpu"` | Triton serving target: `"cpu"` or `"gpu"`. sklearn supports CPU only. Does not move the supplied model or select a GPU index. |
 | `signature` | `None` | MLflow `ModelSignature` with input and output schemas. Inferred from the example and prediction when omitted; `False` is unsupported. |
 | `validate_saved_model` | `False` | When `True`, reload the saved model on CPU for validation. See [validation](#validation-and-limitations). |
-| `registered_model_name` | `None` | Select the latest Registry version; register a new version only for a new/incompatible model. |
+| `registered_model_name` | `None` | Create a Registry version on every call; use the latest version for Triton numbering. |
 | `model_uri` | `None` | Explicit predecessor (`models:/<model_id>`, Registry version/alias, or `runs:/...`); cannot be combined with `registered_model_name`. |
 | `await_registration_for` | `300` | Registration wait timeout in seconds. |
 | `run_id` | `None` | Associate the model with an MLflow run; otherwise MLflow applies its default run behavior. |
@@ -159,18 +168,18 @@ When `model_uri` is supplied, logging compares the generated
 `config.pbtxt` with that model. Otherwise, `registered_model_name` selects the
 latest version of that registered model:
 
-- Equal configuration: reuse the **same MLflow model ID**, append the next Triton
-  directory (`1/`, `2/`, `3/`, ...), and retain earlier directories. When selected
-  by `registered_model_name`, also reuse the existing Registry version.
-- Changed configuration: create a **new MLflow model ID** with Triton directory
-  `1/`. With `registered_model_name`, register it as a new version of that name.
-- No predecessor, or no Triton flavor: create a new model starting at `1/`.
+Every call creates a **new MLflow model ID**. With `registered_model_name`,
+every call also creates a **new Registry version**, even for identical models.
 
-Only metadata and the previous `config.pbtxt` are downloaded. Earlier Triton
-weights, backend code, and requirements remain in storage without being copied.
-The native MLflow package at the artifact root is updated to the latest weights,
-so loading the same model URI (including its Registry URI) returns the new model.
-Without either history parameter, logging always creates a new model at `1/`.
+- Equal configuration: the new snapshot contains the next Triton directory
+  (`2/`, `3/`, ...).
+- Changed configuration, no predecessor, or no Triton flavor: start at `1/`.
+
+Only predecessor metadata and `config.pbtxt` are downloaded. Earlier model
+weights and serving directories stay at their original URIs and are never
+replaced or copied into the new model. Each snapshot has a single Triton version.
+Registry versions and Triton numbers can differ after configuration changes.
+Without either history parameter, logging creates a new model at `1/`.
 
 ```python
 info = mlflow_triton.sklearn.log_model(
@@ -181,7 +190,7 @@ info = mlflow_triton.sklearn.log_model(
 )
 ```
 
-An explicit predecessor does not require registration. `model_uri` and
+An explicit predecessor is read-only and does not require registration. `model_uri` and
 `registered_model_name` are mutually exclusive: supplying both raises `ValueError`
 before model preparation or logging. Each Triton version carries its own serving
 requirements at `<version>/requirements.txt`. Calls updating the same model must
