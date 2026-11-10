@@ -394,13 +394,10 @@ def log_native_model(
             metadata=metadata,
             **save_kwargs,
         )
-        update = None
         if registered_model_name is not None or model_uri is not None:
-            update = extend_registered_repository(
+            extend_registered_repository(
                 prepared, registered_model_name, model_uri=model_uri
             )
-        if update is not None:
-            return _log_update(prepared, update, run_id)
         return Model.log(
             artifact_path=None,
             flavor=sys.modules[__name__],
