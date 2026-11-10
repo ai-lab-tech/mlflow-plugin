@@ -338,6 +338,12 @@ Generated directory layout:
     artifact/         # Self-contained MLflow model, code and assets
 ```
 
+**For your Triton image, install only `<version>/requirements.txt`** (for
+example, `2/requirements.txt` for Triton version 2). Each file contains that
+version's complete recorded Python requirements, including MLflow used by the
+backend; it is not a delta. The artifact-root `requirements.txt` belongs to the
+native MLflow model and is not needed for Triton serving. Do not merge the files.
+
 The serving `requirements.txt` is standalone: requirements and constraints from
 MLflow's saved environment are combined into package requirements, without `-r`
 or `-c` file references. Constraint-only packages become explicit serving
