@@ -81,10 +81,36 @@ are stored at `info.model_uri`; no additional save or load call is needed.
 `info.registered_model_version` identifies the Registry version when requested.
 Logging does not start Triton or deploy a service.
 
-## Register a model after training
+## Register a model
 
-Use the plugin's `register_model()` to apply the same Triton version rules as
-`log_model(..., registered_model_name=...)` after logging and selecting a model:
+Both registration paths below create a new MLflow Registry version on every
+call and apply the same [Registry and Triton version rules](#registry-and-triton-versions).
+They work with the sklearn, PyTorch, and Transformers wrappers.
+
+### Register while logging
+
+Pass `registered_model_name` to log and register the trained model in one call:
+
+```python
+from mlflow_triton import sklearn
+
+info = sklearn.log_model(
+    fitted_pipeline,
+    name="classifier",
+    input_example=X_sample,
+    registered_model_name="classifier",
+)
+print(info.model_uri)
+print(info.registered_model_version)
+```
+
+The return value is MLflow `ModelInfo`. Without `registered_model_name`, logging
+stores a model without registering it.
+
+### Register a model after training
+
+Log model candidates first, then register the selected one with the plugin's
+`register_model()`:
 
 ```python
 from mlflow_triton import register_model, sklearn
@@ -98,13 +124,41 @@ version = register_model(info.model_uri, "classifier")
 print(version.version)  # MLflow Registry version, not the Triton directory number
 ```
 
-Every call creates a **new MLflow Registry version**. Each version retains its
-own native weights. Compatible versions share one growing Triton repository.
+The return value is MLflow `ModelVersion`. Arguments are `model_uri`, `name`,
+`await_registration_for=300`, and optional keyword-only `tags`. Models without
+a Triton flavor use standard MLflow registration. Source references support
+logged-model IDs, Registry versions/aliases, and run URIs. The selected source
+artifacts are copied without loading or retraining the model. Earlier source
+Triton versions and predecessor weights are not downloaded or copied.
+
+For a fresh, unregistered training output, this separate registration step
+renumbers its serving directory before registering it, retaining its model ID
+and source run. This requires artifact deletion support and permission to
+remove the old numbered directory. If the source is already registered
+elsewhere, a new logged snapshot is created instead, so existing Registry
+references keep their original native weights. Registration while logging
+prepares the directory number before upload and does not require this deletion.
+
+Use **`mlflow_triton.register_model`** for these Triton version rules.
+MLflow's own `mlflow.register_model()` and **Register Model in the UI** create
+Registry versions without running the plugin's config comparison or incrementing
+Triton numbers. This package does not install a server-side registration hook.
+
+### Registry and Triton versions
+
+These rules apply to **both** `log_model(..., registered_model_name="classifier")`
+and `mlflow_triton.register_model(model_uri, "classifier")`.
+Every registration creates a **new MLflow Registry version** with its own native
+weights. Compatible versions share one growing Triton repository. Calls for one
+registered name must run sequentially.
+
+Starting with a new registered model:
 
 - First registration: Registry version 1 with Triton directory `1/`.
-- Matching `config.pbtxt`: Registry version 2 with its own Triton directory
-  `2/`, then Registry version 3 with `3/`, and so on.
-- Changed configuration: a new Registry version with Triton directory `1/`.
+- Matching `config.pbtxt`: Registry version 2 adds Triton directory `2/` to the
+  shared repository; the next matching registration adds `3/`, and so on.
+- Changed configuration: a new Registry version starts a separate Triton
+  repository at `1/`. Registry versions and Triton numbers can then differ.
 
 The first compatible model's Triton directory contains the complete history:
 
@@ -115,28 +169,10 @@ First model's artifacts/model_repository/classifier/
 └── 2/    # Run 2
 ```
 
-Only `2/` is appended there. The first model's native weights and root `MLmodel`
-are never replaced, so MLflow Registry version 1 still loads Run 1. New snapshots
-also retain their own serving copy. Their Triton flavor records
-`repository_model_id`, pointing deployment to the shared location. For a fresh,
-unregistered training output, registration renumbers that output's serving
-directory before registering it, retaining its model ID and source run. This
-requires artifact deletion support and permission to remove the old numbered
-directory. If the source is already registered elsewhere, a new logged snapshot
-is created instead, so existing Registry references keep their original weights.
-
-The return value is MLflow `ModelVersion`. Arguments are `model_uri`, `name`,
-`await_registration_for=300`, and optional keyword-only `tags`. Models without
-a Triton flavor use standard MLflow registration. Calls for one registered name
-must run sequentially. Source model references support logged-model IDs,
-Registry versions/aliases, and run URIs. Registration copies the selected source
-artifacts without loading or retraining the model. Earlier source Triton
-versions and predecessor weights are not downloaded or copied.
-
-**Use `mlflow_triton.register_model`, not `mlflow.register_model`, for this behavior.**
-MLflow's own function and **Register Model in the UI** create Registry versions
-without running this plugin's Triton config comparison or incrementing Triton
-numbers. This package does not install a server-side registration hook.
+Only the new numbered directory is appended there. The first model's native
+weights and root `MLmodel` are never replaced, so MLflow Registry version 1 still
+loads Run 1. New snapshots also retain their own serving copy. Their Triton
+flavor records `repository_model_id`, pointing deployment to the shared location.
 
 ## Log API reference
 
@@ -178,7 +214,7 @@ Use `name` for the logged model; `artifact_path` is unsupported.
 
 When `model_uri` is supplied, logging compares the generated
 `config.pbtxt` with that model. Otherwise, `registered_model_name` selects the
-latest version of that registered model:
+latest version of that registered model.
 
 Every call creates a **new MLflow model ID**. With `registered_model_name`,
 every call also creates a **new Registry version**, even for identical models.
@@ -187,10 +223,12 @@ every call also creates a **new Registry version**, even for identical models.
   (`2/`, `3/`, ...).
 - Changed configuration, no predecessor, or no Triton flavor: start at `1/`.
 
-Only predecessor metadata and `config.pbtxt` are downloaded. Earlier native weights and serving directories are never replaced or copied
-into the new model. Only its new numbered serving directory is also uploaded
-to the shared repository at the first compatible model. The first model's Triton directory accumulates compatible versions; later
-snapshots retain their own serving copy and point to that shared repository.
+Only predecessor metadata and `config.pbtxt` are downloaded. Earlier native
+weights and serving directories are never replaced or copied into the new model.
+Only its new numbered serving directory is also uploaded to the shared repository
+at the first compatible model. The first model's Triton directory accumulates
+compatible versions; later snapshots retain their own serving copy and point to
+that shared repository.
 Registry versions and Triton numbers can differ after configuration changes.
 Without either history parameter, logging creates a new model at `1/`.
 
@@ -207,8 +245,8 @@ An explicit predecessor's native weights stay unchanged; its shared Triton
 repository gains the new version. Registration is optional. `model_uri` and
 `registered_model_name` are mutually exclusive: supplying both raises `ValueError`
 before model preparation or logging. Each Triton version carries its own serving
-requirements at `<version>/requirements.txt`. Calls updating the same shared repository must
-run sequentially. A matching predecessor must have a logged-model ID (MLflow 3).
+requirements at `<version>/requirements.txt`. Calls updating the same shared
+repository must run sequentially. A matching predecessor must have a logged-model ID (MLflow 3).
 
 See [model version updates](ADVANCED.md#model-version-updates) for the activity
 diagram, configuration comparison, stored metadata, and concurrency details.
