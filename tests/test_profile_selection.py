@@ -11,7 +11,8 @@ from mlflow_triton_control.deployment_client import TritonControlDeploymentClien
 class ProfileSelectionTests(unittest.TestCase):
     def setUp(self):
         requirements = patch(
-            "mlflow_triton_control._model_uri._read_requirements", return_value=None
+            "mlflow_triton_control._model_uri._read_version_requirements",
+            return_value=None,
         )
         requirements.start()
         self.addCleanup(requirements.stop)

@@ -12,6 +12,7 @@ from mlflow.store.artifact.models_artifact_repo import ModelsArtifactRepository
 from mlflow.store.artifact.runs_artifact_repo import RunsArtifactRepository
 from mlflow.tracking._tracking_service.utils import get_default_host_creds
 from mlflow.utils.rest_utils import http_request
+from mlflow_triton._versions import _repository_model_id
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,19 @@ def _read_requirements(repository_artifact_uri):
             "Could not read the Triton requirements.txt from MLflow artifacts; "
             "check artifact access and the UTF-8 file (maximum 1 MiB)"
         ) from exc
+
+
+def _read_version_requirements(repository_uri, flavor):
+    """Prefer version-local requirements, retaining support for older artifacts."""
+    number = flavor.get("model_version", 1)
+    if type(number) is not int or number < 1:
+        raise MlflowException("Invalid Triton model_version in model metadata")
+    entries = mlflow.artifacts.list_artifacts(artifact_uri=repository_uri)
+    if any(item.is_dir and Path(item.path).name == str(number) for item in entries):
+        requirements = _read_requirements(repository_uri + "/" + str(number))
+        if requirements is not None:
+            return requirements
+    return _read_requirements(repository_uri)
 
 
 def resolve_deployment_artifacts(model_uri):
@@ -134,7 +148,6 @@ def _resolve_model(model_uri, *, include_requirements):
         )
     try:
         artifact_uri = _artifact_uri(model_uri)
-        root = _s3_location(artifact_uri)
         metadata = get_model_info(artifact_uri)
         flavor = metadata.flavors.get("triton")
         if not isinstance(flavor, dict):
@@ -151,8 +164,17 @@ def _resolve_model(model_uri, *, include_requirements):
             raise MlflowException(
                 "Triton flavor model_name does not match its data path"
             )
+        owner = _repository_model_id(flavor)
+        if owner is not None:
+            artifact_uri = _artifact_uri(f"models:/{owner}")
+            canonical = get_model_info(artifact_uri).flavors.get("triton")
+            if not isinstance(canonical, dict) or canonical.get("data") != data:
+                raise MlflowException(
+                    "Shared Triton repository has incompatible metadata"
+                )
+        root = _s3_location(artifact_uri)
         requirements = (
-            _read_requirements(artifact_uri.rstrip("/") + "/" + data)
+            _read_version_requirements(artifact_uri.rstrip("/") + "/" + data, flavor)
             if include_requirements
             else None
         )

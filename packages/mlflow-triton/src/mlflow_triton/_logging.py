@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 import mlflow
+from mlflow.entities import LoggedModelOutput, LoggedModelStatus, Metric
 from mlflow.models import Model, infer_signature
 
 from . import _runtime
@@ -17,6 +18,7 @@ from ._architecture import validate_init_kwargs, write_architecture
 from ._request import write_request_example
 from ._requirements import serving_requirements
 from ._signature import config_text, contract_from_signature, validate_serving_options
+from ._versions import append_shared_version, extend_registered_repository
 
 
 def _validate_inputs(
@@ -187,7 +189,7 @@ def _assemble_repository(
     shutil.copyfile(Path(_runtime.__file__), version / "model.py")
     (repository / "config.pbtxt").write_text(config)
     write_request_example(repository, input_example, contract)
-    (repository / "requirements.txt").write_text(
+    (version / "requirements.txt").write_text(
         serving_requirements(package, mlflow.__version__), encoding="utf-8"
     )
     (repository / "validation.json").write_text(
@@ -216,6 +218,7 @@ def _assemble_repository(
         "triton",
         data=f"model_repository/{triton_model_name}",
         model_name=triton_model_name,
+        model_version=1,
     )
     metadata.save(package / "MLmodel")
     return package
@@ -306,6 +309,56 @@ def save_model(path, prepared_path, mlflow_model=None, validate_serving_input=Fa
     target.save(Path(path) / "MLmodel")
 
 
+def _log_update(prepared, update, run_id):
+    """Merge new artifacts without duplicating an existing run/model association."""
+    client = mlflow.MlflowClient()
+    logged = client.get_logged_model(update.model_id)
+    if run_id is None and (active := mlflow.active_run()) is not None:
+        run_id = active.info.run_id
+    run = client.get_run(run_id) if run_id else None
+    metadata = Model.load(prepared / "MLmodel")
+    metadata.model_id = logged.model_id
+    metadata.model_uuid = logged.model_id
+    metadata.artifact_path = logged.artifact_location
+    metadata.run_id = run_id
+    metadata.save(prepared / "MLmodel")
+
+    # log_model_artifacts merges files: older Triton directories are not touched.
+    # Model.log(model_id=...) cannot be used here because MLflow 3.14 attempts
+    # to insert the same run/model output twice when updating within one run.
+    try:
+        client.log_model_artifacts(logged.model_id, str(prepared))
+    except Exception:
+        client.finalize_logged_model(logged.model_id, LoggedModelStatus.FAILED)
+        raise
+    client.finalize_logged_model(logged.model_id, LoggedModelStatus.READY)
+    if run is not None:
+        outputs = run.outputs.model_outputs if run.outputs else []
+        if not any(output.model_id == logged.model_id for output in outputs):
+            client.log_outputs(run_id, [LoggedModelOutput(logged.model_id, step=0)])
+        # Match normal Model.log's association of step-zero run metrics.
+        metrics = [
+            Metric(
+                key=metric.key,
+                value=metric.value,
+                timestamp=metric.timestamp,
+                step=metric.step,
+                dataset_name=metric.dataset_name,
+                dataset_digest=metric.dataset_digest,
+                run_id=run_id,
+                model_id=logged.model_id,
+            )
+            for name in run.data.metrics
+            for metric in client.get_metric_history(run_id, name)
+            if metric.step == 0 and metric.model_id is None
+        ]
+        if metrics:
+            client.log_batch(run_id=run_id, metrics=metrics)
+    info = metadata.get_model_info(client.get_logged_model(logged.model_id))
+    info.registered_model_version = update.registered_model_version
+    return info
+
+
 def log_native_model(
     flavor,
     model,
@@ -317,6 +370,7 @@ def log_native_model(
     device="cpu",
     validate_saved_model=False,
     registered_model_name=None,
+    model_uri=None,
     await_registration_for=300,
     run_id=None,
     metadata=None,
@@ -324,6 +378,8 @@ def log_native_model(
     params=None,
     **save_kwargs,
 ):
+    if registered_model_name is not None and model_uri is not None:
+        raise ValueError("registered_model_name and model_uri are mutually exclusive")
     with tempfile.TemporaryDirectory(prefix="mlflow-triton-log-") as temporary:
         prepared = Path(temporary) / "prepared"
         prepare_model(
@@ -338,6 +394,12 @@ def log_native_model(
             metadata=metadata,
             **save_kwargs,
         )
+        update = None
+        if registered_model_name is not None or model_uri is not None:
+            update = extend_registered_repository(
+                prepared, registered_model_name, model_uri=model_uri
+            )
+        append_shared_version(prepared, update)
         return Model.log(
             artifact_path=None,
             flavor=sys.modules[__name__],
