@@ -79,24 +79,28 @@ or establish GPU correctness.
 
 Every logging call creates a separate logged-model ID and artifact location.
 `registered_model_name` also creates a Registry version on every call. Existing
-registered models are never overwritten, so loading Registry version 1 still
+native packages are never overwritten, so loading Registry version 1 still
 returns the model originally registered as version 1.
 
-`model_uri` selects a read-only predecessor (`models:/<model_id>`, a Registry
+`model_uri` selects a predecessor with unchanged native weights (`models:/<model_id>`, a Registry
 version/alias, or `runs:/<run_id>/<path>`). Alternatively,
 `registered_model_name` selects the latest Registry version for config comparison.
 The two parameters are mutually exclusive.
 
 | Predecessor config | Logged model | Triton directory | Registry with name |
 | --- | --- | --- | --- |
-| Matching | New ID | Next number, in new snapshot only | New version |
+| Matching | New ID | Next number, also appended to shared repository | New version |
 | Different | New ID | `1/` | New version |
 | None, or no Triton flavor | New ID | `1/` | New version |
 
 For two compatible calls, Registry versions 1 and 2 point to separate snapshots
-containing `1/` and `2/`, respectively. A third call with changed configuration
+containing `1/` and `2/`, respectively. The first model's Triton repository
+also gains `2/`, so Triton can load both from a single location. A third call with changed configuration
 creates Registry version 3 with directory `1/`. No previous weights are copied.
-Only the predecessor metadata and `config.pbtxt` are downloaded.
+Only predecessor metadata, directory listings, and `config.pbtxt` are read.
+Only the new numbered serving directory is uploaded to the shared owner; root
+`MLmodel`, native weights, config, and previous numbered directories are not
+uploaded or overwritten there.
 
 Config comparison ignores protobuf whitespace and comments, preserving values
 and field order. Weights, backend code, and requirements are not compared. The
@@ -105,17 +109,26 @@ Each Triton directory has its own requirements. Logging does not deploy or
 reload Triton.
 
 The flavor records `model_version`, `repository_group`, and, for matching
-configurations, `model_uri`. Each call applies its own `name`, `params`, and
+configurations, `model_uri` and `repository_model_id`. The latter identifies the
+first logged model that owns the shared Triton repository. Deployment resolves
+this ID before choosing the repository URI, while native MLflow loading continues
+to use the requested snapshot. Deployment reads the requested version's
+requirements from that shared directory. Triton's default policy serves the
+latest version; clients can request a specific Triton version. Each call applies its own `name`, `params`, and
 `tags` and is associated with its own active or supplied run.
 Calls using the same registered name must be sequential for sequential Triton
-numbering; there is no distributed lock. A failed new-model upload does not
-change its predecessor.
+numbering; there is no distributed lock. Native snapshots are preserved on failure, but serving uploads are not
+transactional: an interrupted operation can leave an unregistered or partial
+numbered directory. Existing version directories are never overwritten. Version
+allocation uses the maximum of predecessor metadata and existing numeric
+directories, preventing reuse when branching from an older snapshot.
 
 ### Separate registration
 
 `mlflow_triton.register_model(model_uri, name)` compares the source's
 configuration with the latest registered model. Every call creates a Registry
-`ModelVersion`. Matching configs advance the Triton number; different configs
+`ModelVersion`. Matching configs append only the new numbered directory to the
+shared repository and advance the Triton number; different configs
 start at `1/`. The selected source artifacts are staged without loading weights.
 Earlier source directories and predecessor weights are not downloaded or copied.
 
@@ -125,7 +138,9 @@ and the old numbered directory is removed before registration. Artifact storage
 must support deletion and the caller must have deletion permission. Upload or
 deletion failures abort registration; artifact operations are not transactional.
 A source already referenced by a visible Registry version is instead copied to
-a fresh logged model before renumbering, preserving those registered artifacts.
+a fresh logged model before renumbering, preserving its native package and
+existing serving versions. Its shared serving repository can still gain the
+new directory.
 Registry access failures abort the operation. Serialize registration with other
 operations on the source; there is no lock across clients.
 
@@ -137,7 +152,8 @@ This package does not install a server-side registration hook.
 
 Logging creates two copies of the model: the MLflow model and a self-contained
 copy for Triton serving. Logging reads only predecessor metadata and config;
-it never copies earlier model versions. Existing registered snapshots remain unchanged. Allow disk space for the new model's two copies and
+it never copies earlier model versions. Existing native snapshots and serving versions remain unchanged; the shared
+serving repository accumulates one copy of each new compatible version. Allow disk space for the new model's two copies and
 MLflow's temporary files. Set `TMPDIR` before logging to choose a temporary
 directory on a disk with enough space. Incomplete staging files are cleaned up if packaging fails.
 

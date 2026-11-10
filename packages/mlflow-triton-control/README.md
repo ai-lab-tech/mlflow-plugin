@@ -120,3 +120,12 @@ Set `MODEL_URI` to the logged model's `info.model_uri` and replace
 Serving requirements are read from `<model_version>/requirements.txt` (version 1
 when legacy metadata omits the number). Older artifacts with requirements next to
 `config.pbtxt` remain supported as a fallback.
+
+### Shared Triton versions
+
+Compatible logged/registered models use the first model's Triton repository as
+a shared serving location. The deployment client follows the Triton flavor's
+`repository_model_id`, so Registry versions 1 and 2 deploy from the same
+repository containing `1/` and `2/`. Their native MLflow packages remain separate.
+The requested snapshot's version-local requirements are read from the shared
+repository. A configuration change starts a new repository at `1/`.

@@ -13,6 +13,7 @@ from ._versions import (
     RepositoryUpdate,
     _previous_artifact_uri,
     _repository_data,
+    append_shared_version,
     extend_registered_repository,
 )
 
@@ -75,12 +76,16 @@ def register_model(model_uri, name, await_registration_for=300, *, tags=None):
                 shutil.copytree(local, repository / "1")
             else:
                 shutil.copy2(local, repository / filename)
-        extend_registered_repository(prepared, name)
+        update = extend_registered_repository(prepared, name)
         prepared_info = Model.load(prepared / "MLmodel")
         target_number = prepared_info.flavors["triton"]["model_version"]
         client = mlflow.MlflowClient()
         stable_uri = f"models:/{info.model_id}" if info.model_id else model_uri
-        if target_number == number:
+        append_shared_version(prepared, update)
+        same_owner = prepared_info.flavors["triton"].get(
+            "repository_model_id"
+        ) == flavor.get("repository_model_id")
+        if target_number == number and same_owner:
             # No renumbering is needed, so registration can reference the source.
             return mlflow.register_model(
                 stable_uri,
@@ -92,7 +97,10 @@ def register_model(model_uri, name, await_registration_for=300, *, tags=None):
             # A fresh, unregistered training output keeps its own model ID.
             # Renumber only its serving directory; never change a registered source.
             _logging._log_update(prepared, RepositoryUpdate(info.model_id), info.run_id)
-            get_artifact_repository(source).delete_artifacts(data + "/" + str(number))
+            if target_number != number:
+                get_artifact_repository(source).delete_artifacts(
+                    data + "/" + str(number)
+                )
             return mlflow.register_model(
                 stable_uri,
                 name,

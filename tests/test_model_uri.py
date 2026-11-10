@@ -56,6 +56,88 @@ class ModelUriTests(unittest.TestCase):
                 resolve.assert_called_once_with(model_uri)
                 metadata.assert_called_once_with("s3://bucket/models/m-123")
 
+    def test_shared_repository_is_resolved_for_latest_snapshot_and_requirements(self):
+        own = SimpleNamespace(
+            flavors={
+                "triton": {
+                    "data": "model_repository/classifier",
+                    "model_name": "classifier",
+                    "model_version": 2,
+                    "repository_model_id": "m-first",
+                }
+            }
+        )
+        canonical = SimpleNamespace(
+            flavors={
+                "triton": {
+                    "data": "model_repository/classifier",
+                    "model_name": "classifier",
+                    "model_version": 1,
+                }
+            }
+        )
+
+        def underlying(uri):
+            return {
+                "models:/classifier/2": "s3://bucket/second",
+                "models:/m-first": "s3://bucket/first",
+            }[uri]
+
+        def metadata(uri):
+            return {"s3://bucket/second": own, "s3://bucket/first": canonical}[uri]
+
+        with (
+            patch.object(
+                resolver.ModelsArtifactRepository,
+                "get_underlying_uri",
+                side_effect=underlying,
+            ),
+            patch.object(resolver, "get_model_info", side_effect=metadata),
+            patch.object(
+                resolver, "_read_version_requirements", return_value="scikit-learn"
+            ) as requirements,
+            patch(
+                "mlflow.artifacts.download_artifacts",
+                side_effect=AssertionError("weights download"),
+            ),
+        ):
+            result = resolver.resolve_deployment_artifacts("models:/classifier/2")
+        self.assertEqual(
+            result.repository_uri, "s3://bucket/first/model_repository/classifier"
+        )
+        self.assertEqual(result.requirements_txt, "scikit-learn")
+        requirements.assert_called_once_with(
+            "s3://bucket/first/model_repository/classifier", own.flavors["triton"]
+        )
+
+    def test_invalid_shared_repository_owner_fails_without_resolving_it(self):
+        for owner in (
+            "../outside",
+            "m-123/../../outside",
+            "models:/other@alias",
+            42,
+            "",
+        ):
+            metadata = SimpleNamespace(
+                flavors={
+                    "triton": {
+                        "data": "model_repository/classifier",
+                        "model_name": "classifier",
+                        "repository_model_id": owner,
+                    }
+                }
+            )
+            with (
+                self.subTest(owner=owner),
+                patch.object(
+                    resolver, "_artifact_uri", return_value="s3://bucket/source"
+                ) as resolve,
+                patch.object(resolver, "get_model_info", return_value=metadata),
+                self.assertRaises(MlflowException),
+            ):
+                resolver.resolve_model_uri("models:/m-source")
+            resolve.assert_called_once_with("models:/m-source")
+
     def test_nested_registry_run_reference(self):
         with (
             patch.object(

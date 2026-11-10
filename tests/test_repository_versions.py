@@ -39,12 +39,20 @@ class RepositoryVersionTests(unittest.TestCase):
     def extend(self, package, previous, version="1", status="READY"):
         metadata = Model.load(previous / "MLmodel")
         metadata.model_id = "m-existing"
+        metadata.flavors["triton"].pop("repository_model_id", None)
 
         def download(artifact_uri, dst_path):
             relative = artifact_uri.split(f"/{version}/", 1)[1]
             return str(previous / relative)
 
         with (
+            patch(
+                "mlflow.artifacts.list_artifacts",
+                return_value=[
+                    SimpleNamespace(path=str(p), is_dir=p.is_dir())
+                    for p in (previous / "model_repository/model").iterdir()
+                ],
+            ),
             patch.object(_versions, "MlflowClient"),
             patch.object(
                 _versions,
@@ -499,6 +507,20 @@ class RepositoryVersionTests(unittest.TestCase):
                 ),
                 [index] * 2,
             )
+        for original in (infos[0], infos[2]):
+            shared = (
+                Path(
+                    mlflow.artifacts.download_artifacts(artifact_uri=original.model_uri)
+                )
+                / "model_repository/model"
+            )
+            self.assertEqual(
+                {p.name for p in shared.iterdir() if p.is_dir()}, {"1", "2"}
+            )
+        for original, compatible in ((infos[0], infos[1]), (infos[2], infos[3])):
+            self.assertEqual(
+                compatible.flavors["triton"]["repository_model_id"], original.model_id
+            )
         versions = client.search_model_versions()
         self.assertEqual(len(versions), 5 if registered else 0)
         if registered:
@@ -538,7 +560,7 @@ class RepositoryVersionTests(unittest.TestCase):
                 )
                 update_run = mlflow.active_run().info.run_id
             self.assertNotEqual(repeated.model_id, fourth.model_id)
-            self.assertEqual(repeated.flavors["triton"]["model_version"], 2)
+            self.assertEqual(repeated.flavors["triton"]["model_version"], 4)
             self.assertEqual(len(client.get_run(update_run).outputs.model_outputs), 2)
             self.assertTrue(
                 any(
@@ -547,8 +569,8 @@ class RepositoryVersionTests(unittest.TestCase):
                 )
             )
             self.assertNotEqual(fourth.model_id, infos[0].model_id)
-            self.assertEqual(fourth.flavors["triton"]["model_version"], 2)
-            self.assertFalse((snapshots[0][0].parent / "2").exists())
+            self.assertEqual(fourth.flavors["triton"]["model_version"], 3)
+            self.assertTrue((snapshots[0][0].parent / "4").exists())
 
     def test_real_logged_model_history_without_registry(self):
         self.check_real_updates(registered=False)

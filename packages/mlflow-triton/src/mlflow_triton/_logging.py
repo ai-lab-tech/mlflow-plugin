@@ -18,7 +18,7 @@ from ._architecture import validate_init_kwargs, write_architecture
 from ._request import write_request_example
 from ._requirements import serving_requirements
 from ._signature import config_text, contract_from_signature, validate_serving_options
-from ._versions import extend_registered_repository
+from ._versions import append_shared_version, extend_registered_repository
 
 
 def _validate_inputs(
@@ -394,10 +394,12 @@ def log_native_model(
             metadata=metadata,
             **save_kwargs,
         )
+        update = None
         if registered_model_name is not None or model_uri is not None:
-            extend_registered_repository(
+            update = extend_registered_repository(
                 prepared, registered_model_name, model_uri=model_uri
             )
+        append_shared_version(prepared, update)
         return Model.log(
             artifact_path=None,
             flavor=sys.modules[__name__],

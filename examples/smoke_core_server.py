@@ -255,7 +255,7 @@ class CoreServerSmokeTests(unittest.TestCase):
         # Assert
         groups = []
         for index, (info, (model, example), versions) in enumerate(
-            zip(infos, cases, (["1"], ["2"], ["1"])), 1
+            zip(infos, cases, (["1", "2"], ["2"], ["1"])), 1
         ):
             _, repository = self.verify_model(
                 info, example, model.predict(example), "sklearn", "iris"
@@ -273,6 +273,32 @@ class CoreServerSmokeTests(unittest.TestCase):
                 mlflow.models.get_model_info(info.model_uri).flavors["triton"][
                     "repository_group"
                 ]
+            )
+        shared = (
+            self.client.get_logged_model(infos[0].model_id).artifact_location
+            + "/model_repository/iris"
+        )
+        self.assertEqual(
+            mlflow.models.get_model_info(infos[1].model_uri).flavors["triton"][
+                "repository_model_id"
+            ],
+            infos[0].model_id,
+        )
+        self.assertEqual(
+            {
+                Path(e.path).name
+                for e in mlflow.artifacts.list_artifacts(artifact_uri=shared)
+                if e.is_dir
+            },
+            {"1", "2"},
+        )
+        for number, (model, example) in enumerate(cases[:2], 1):
+            version = Path(
+                mlflow.artifacts.download_artifacts(artifact_uri=shared + f"/{number}")
+            )
+            native = mlflow.pyfunc.load_model(str(version / "artifact"))
+            np.testing.assert_array_equal(
+                native.predict(example), model.predict(example)
             )
         self.assertEqual(groups[0], groups[1])
         self.assertNotEqual(groups[1], groups[2])
@@ -312,6 +338,32 @@ class CoreServerSmokeTests(unittest.TestCase):
         np.testing.assert_array_equal(
             old.predict(example), first_model.predict(example)
         )
+        shared = (
+            self.client.get_logged_model(first.model_id).artifact_location
+            + "/model_repository/iris"
+        )
+        self.assertEqual(
+            mlflow.models.get_model_info(second.model_uri).flavors["triton"][
+                "repository_model_id"
+            ],
+            first.model_id,
+        )
+        self.assertEqual(
+            {
+                Path(e.path).name
+                for e in mlflow.artifacts.list_artifacts(artifact_uri=shared)
+                if e.is_dir
+            },
+            {"1", "2"},
+        )
+        for number, model in ((1, first_model), (2, updated)):
+            version_dir = Path(
+                mlflow.artifacts.download_artifacts(artifact_uri=shared + f"/{number}")
+            )
+            native = mlflow.pyfunc.load_model(str(version_dir / "artifact"))
+            np.testing.assert_array_equal(
+                native.predict(example), model.predict(example)
+            )
         changed, changed_example = self.iris(columns=3)
         third = sklearn.log_model(
             changed, input_example=changed_example, name="iris", run_id=self.run_id

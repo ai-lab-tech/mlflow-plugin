@@ -98,15 +98,27 @@ version = register_model(info.model_uri, "classifier")
 print(version.version)  # MLflow Registry version, not the Triton directory number
 ```
 
-Every call creates a **new MLflow Registry version**. Existing registered
-models and their weights remain unchanged.
+Every call creates a **new MLflow Registry version**. Each version retains its
+own native weights. Compatible versions share one growing Triton repository.
 
 - First registration: Registry version 1 with Triton directory `1/`.
 - Matching `config.pbtxt`: Registry version 2 with its own Triton directory
   `2/`, then Registry version 3 with `3/`, and so on.
 - Changed configuration: a new Registry version with Triton directory `1/`.
 
-Each registered snapshot contains only its own Triton directory. For a fresh,
+The first compatible model's Triton directory contains the complete history:
+
+```text
+First model's artifacts/model_repository/classifier/
+├── config.pbtxt
+├── 1/    # Run 1
+└── 2/    # Run 2
+```
+
+Only `2/` is appended there. The first model's native weights and root `MLmodel`
+are never replaced, so MLflow Registry version 1 still loads Run 1. New snapshots
+also retain their own serving copy. Their Triton flavor records
+`repository_model_id`, pointing deployment to the shared location. For a fresh,
 unregistered training output, registration renumbers that output's serving
 directory before registering it, retaining its model ID and source run. This
 requires artifact deletion support and permission to remove the old numbered
@@ -175,9 +187,10 @@ every call also creates a **new Registry version**, even for identical models.
   (`2/`, `3/`, ...).
 - Changed configuration, no predecessor, or no Triton flavor: start at `1/`.
 
-Only predecessor metadata and `config.pbtxt` are downloaded. Earlier model
-weights and serving directories stay at their original URIs and are never
-replaced or copied into the new model. Each snapshot has a single Triton version.
+Only predecessor metadata and `config.pbtxt` are downloaded. Earlier native weights and serving directories are never replaced or copied
+into the new model. Only its new numbered serving directory is also uploaded
+to the shared repository at the first compatible model. The first model's Triton directory accumulates compatible versions; later
+snapshots retain their own serving copy and point to that shared repository.
 Registry versions and Triton numbers can differ after configuration changes.
 Without either history parameter, logging creates a new model at `1/`.
 
@@ -190,10 +203,11 @@ info = mlflow_triton.sklearn.log_model(
 )
 ```
 
-An explicit predecessor is read-only and does not require registration. `model_uri` and
+An explicit predecessor's native weights stay unchanged; its shared Triton
+repository gains the new version. Registration is optional. `model_uri` and
 `registered_model_name` are mutually exclusive: supplying both raises `ValueError`
 before model preparation or logging. Each Triton version carries its own serving
-requirements at `<version>/requirements.txt`. Calls updating the same model must
+requirements at `<version>/requirements.txt`. Calls updating the same shared repository must
 run sequentially. A matching predecessor must have a logged-model ID (MLflow 3).
 
 See [model version updates](ADVANCED.md#model-version-updates) for the activity

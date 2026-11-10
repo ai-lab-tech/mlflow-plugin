@@ -54,7 +54,7 @@ def run_smoke(output):
         client = MlflowClient()
         inputs, targets = load_iris(return_X_y=True, as_frame=True)
         cases = [
-            ("original", inputs, 1.0, ["1"]),
+            ("original", inputs, 1.0, ["1", "2"]),
             ("compatible", inputs, 0.05, ["2"]),
             ("incompatible", inputs.iloc[:, :3], 0.05, ["1"]),
         ]
@@ -128,7 +128,7 @@ def run_smoke(output):
                 native = mlflow.pyfunc.load_model(
                     str(repository / version / "artifact")
                 )
-                version_model = model
+                version_model = models[int(version) - 1] if index == 1 else model
                 np.testing.assert_allclose(
                     native.predict(example), version_model.predict_proba(example)
                 )

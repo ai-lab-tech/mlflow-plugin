@@ -8,7 +8,7 @@ from unittest.mock import patch
 import mlflow
 import numpy as np
 from mlflow.models import Model
-from mlflow_triton import register_model, sklearn
+from mlflow_triton import _versions, register_model, sklearn
 from sklearn.dummy import DummyRegressor
 
 
@@ -17,7 +17,9 @@ def snapshot(path):
     return {
         p.relative_to(path): p.read_bytes()
         for p in path.rglob("*")
-        if p.is_file() and p.name != "registered_model_meta"
+        if p.is_file()
+        and p.name != "registered_model_meta"
+        and "model_repository" not in p.relative_to(path).parts
     }
 
 
@@ -55,6 +57,11 @@ class RegistrationTests(unittest.TestCase):
         self.assertEqual(str(version.version), "1")
         first_path = self.path(first.model_uri)
         original = snapshot(first_path)
+        old_serving = {
+            p.relative_to(first_path): p.read_bytes()
+            for p in (first_path / "model_repository/model/1").rglob("*")
+            if p.is_file()
+        }
         second = self.log(2)
         version = register_model(
             second.model_uri, "classifier", tags={"owner": "second"}
@@ -73,13 +80,26 @@ class RegistrationTests(unittest.TestCase):
             self.assertEqual(metadata.flavors["triton"]["model_version"], number)
             repository = self.path(uri) / "model_repository/model"
             self.assertEqual(
-                {p.name for p in repository.iterdir() if p.is_dir()}, {str(number)}
+                {p.name for p in repository.iterdir() if p.is_dir()},
+                {"1", "2"} if number == 1 else {"2"},
             )
             for native in (uri, str(repository / str(number) / "artifact")):
                 np.testing.assert_array_equal(
                     mlflow.pyfunc.load_model(native).predict(np.ones((2, 1))),
                     [number] * 2,
                 )
+        metadata = mlflow.models.get_model_info("models:/classifier/2")
+        self.assertEqual(
+            metadata.flavors["triton"]["repository_model_id"], first.model_id
+        )
+        self.assertEqual(
+            {
+                p.relative_to(first_path): p.read_bytes()
+                for p in (first_path / "model_repository/model/1").rglob("*")
+                if p.is_file()
+            },
+            old_serving,
+        )
         third = self.log(3)
         version = register_model(third.model_uri, "classifier")
         self.assertEqual(str(version.version), "3")
@@ -97,6 +117,16 @@ class RegistrationTests(unittest.TestCase):
             3,
         )
         self.assertEqual(snapshot(first_path), original)
+        shared = first_path / "model_repository/model"
+        self.assertEqual(
+            {p.name for p in shared.iterdir() if p.is_dir()}, {"1", "2", "3"}
+        )
+        self.assertEqual(
+            mlflow.models.get_model_info("models:/classifier/3").flavors["triton"][
+                "repository_model_id"
+            ],
+            first.model_id,
+        )
 
     def test_changed_config_registers_new_model_at_one(self):
         first = self.log(1)
@@ -159,6 +189,67 @@ class RegistrationTests(unittest.TestCase):
             mlflow.pyfunc.load_model("models:/other/1").predict(np.ones((2, 1))), [1, 1]
         )
         self.assertEqual(snapshot(self.path(first.model_uri)), original)
+
+    def test_shared_upload_failure_prevents_registration_and_native_changes(self):
+        first = self.log(1)
+        register_model(first.model_uri, "classifier")
+        original = snapshot(self.path(first.model_uri))
+        second = self.log(2)
+        with (
+            patch.object(
+                mlflow.MlflowClient,
+                "log_model_artifacts",
+                side_effect=PermissionError("shared upload"),
+            ),
+            self.assertRaisesRegex(PermissionError, "shared upload"),
+        ):
+            register_model(second.model_uri, "classifier")
+        self.assertEqual(len(mlflow.MlflowClient().search_model_versions()), 1)
+        self.assertEqual(snapshot(self.path(first.model_uri)), original)
+        self.assertFalse(
+            (self.path(first.model_uri) / "model_repository/model/2").exists()
+        )
+
+    def test_log_registration_shared_upload_failure_keeps_first_model_ready(self):
+        first = self.log(1, registered_model_name="classifier")
+        original = snapshot(self.path(first.model_uri))
+        with (
+            patch.object(
+                mlflow.MlflowClient,
+                "log_model_artifacts",
+                side_effect=PermissionError("shared upload"),
+            ),
+            self.assertRaisesRegex(PermissionError, "shared upload"),
+        ):
+            self.log(2, registered_model_name="classifier")
+        self.assertEqual(len(mlflow.MlflowClient().search_model_versions()), 1)
+        self.assertEqual(snapshot(self.path(first.model_uri)), original)
+        self.assertEqual(
+            mlflow.MlflowClient().get_logged_model(first.model_id).status, "READY"
+        )
+
+    def test_existing_shared_version_cannot_be_overwritten(self):
+        first = self.log(1, registered_model_name="classifier")
+        second = self.log(2, registered_model_name="classifier")
+        prepared = self.path(second.model_uri)
+        shared = self.path(first.model_uri) / "model_repository/model"
+        original = {
+            str(p.relative_to(shared)): p.read_bytes()
+            for p in shared.rglob("*")
+            if p.is_file()
+        }
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            _versions.append_shared_version(
+                prepared, _versions.RepositoryUpdate(first.model_id)
+            )
+        self.assertEqual(
+            {
+                str(p.relative_to(shared)): p.read_bytes()
+                for p in shared.rglob("*")
+                if p.is_file()
+            },
+            original,
+        )
 
     def test_source_without_triton_uses_standard_mlflow_registration(self):
         with (

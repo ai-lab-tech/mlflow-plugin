@@ -1,5 +1,6 @@
 """Number new Triton models using predecessor metadata and config compatibility."""
 
+import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +18,7 @@ from mlflow.utils.file_utils import local_file_uri_to_path
 
 @dataclass(frozen=True)
 class RepositoryUpdate:
-    """Existing logged model (and optional registration) to reuse."""
+    """Owner of the shared Triton repository; its native model is never replaced."""
 
     model_id: str
     registered_model_version: int | None = None
@@ -89,7 +90,17 @@ def _advance_compatible_version(repository, source, previous_flavor):
     previous_number = previous_flavor.get("model_version", 1)
     if type(previous_number) is not int or previous_number < 1:
         raise ValueError("Invalid Triton model_version in previous model metadata")
-    number = previous_number + 1
+    # The shared repository may have advanced since this predecessor was logged.
+    # Listing directory names avoids downloading any earlier model weights.
+    entries = mlflow.artifacts.list_artifacts(artifact_uri=source)
+    numbers = [
+        int(Path(entry.path).name)
+        for entry in entries
+        if entry.is_dir
+        and Path(entry.path).name.isascii()
+        and Path(entry.path).name.isdecimal()
+    ]
+    number = max([previous_number, *numbers]) + 1
     (repository / "1").rename(repository / str(number))
     return number
 
@@ -131,6 +142,8 @@ def extend_registered_repository(
     metadata = Model.load(prepared / "MLmodel")
     flavor = metadata.flavors["triton"]
     repository = prepared / flavor["data"]
+    flavor.pop("repository_model_id", None)
+    flavor.pop("model_uri", None)
     flavor.update(repository_group=uuid.uuid4().hex, model_version=1)
     uri = model_uri
     source = None
@@ -153,11 +166,15 @@ def extend_registered_repository(
         previous_flavor = previous_info.flavors.get("triton")
         if previous_flavor is not None:
             data = _repository_data(previous_flavor)
+            owner = _repository_model_id(previous_flavor)
+            repository_source = (
+                _previous_artifact_uri(f"models:/{owner}") if owner else source
+            )
             number = _advance_compatible_version(
-                repository, source + "/" + data, previous_flavor
+                repository, repository_source + "/" + data, previous_flavor
             )
             if number is not None:
-                model_id = getattr(previous_info, "model_id", None)
+                model_id = owner or getattr(previous_info, "model_id", None)
                 if not isinstance(model_id, str) or not model_id:
                     raise ValueError(
                         "Compatible predecessor has no MLflow logged-model ID; "
@@ -165,9 +182,46 @@ def extend_registered_repository(
                     )
                 update = RepositoryUpdate(model_id, registry_version)
                 flavor.update(
+                    repository_model_id=model_id,
                     repository_group=previous_flavor.get("repository_group") or source,
                     model_version=number,
                     model_uri=uri,
                 )
     metadata.save(prepared / "MLmodel")
     return update
+
+
+def _repository_model_id(flavor):
+    """Validate a shared owner as a logged-model ID, never a path or Registry alias."""
+    owner = flavor.get("repository_model_id")
+    if owner is not None and (
+        not isinstance(owner, str) or not re.fullmatch(r"m-[A-Za-z0-9_-]+", owner)
+    ):
+        raise ValueError("Invalid Triton repository_model_id")
+    return owner
+
+
+def append_shared_version(prepared, update):
+    """Upload only the new numbered directory to the shared owner's repository."""
+    if update is None:
+        return
+    flavor = Model.load(prepared / "MLmodel").flavors["triton"]
+    data = _repository_data(flavor)
+    number = str(flavor["model_version"])
+    client = MlflowClient()
+    uri = (
+        client.get_logged_model(update.model_id).artifact_location.rstrip("/")
+        + "/"
+        + data
+    )
+    if any(
+        Path(entry.path).name == number
+        for entry in mlflow.artifacts.list_artifacts(artifact_uri=uri)
+    ):
+        raise ValueError("Triton version already exists; serialize model updates")
+    # Do not upload root MLmodel, native weights, config, or earlier directories.
+    client.log_model_artifacts(
+        update.model_id,
+        str(prepared / data / number),
+        artifact_path=data + "/" + number,
+    )
