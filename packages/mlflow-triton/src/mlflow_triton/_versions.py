@@ -209,19 +209,24 @@ def append_shared_version(prepared, update):
     data = _repository_data(flavor)
     number = str(flavor["model_version"])
     client = MlflowClient()
-    uri = (
-        client.get_logged_model(update.model_id).artifact_location.rstrip("/")
-        + "/"
-        + data
-    )
+    artifact_uri = client.get_logged_model(update.model_id).artifact_location
+    uri = artifact_uri.rstrip("/") + "/" + data
     if any(
         Path(entry.path).name == number
         for entry in mlflow.artifacts.list_artifacts(artifact_uri=uri)
     ):
         raise ValueError("Triton version already exists; serialize model updates")
     # Do not upload root MLmodel, native weights, config, or earlier directories.
-    client.log_model_artifacts(
-        update.model_id,
-        str(prepared / data / number),
-        artifact_path=data + "/" + number,
-    )
+    # MLflow 3.14's client method has no artifact_path argument. Stage the
+    # relative upload path instead, moving the new version without copying it.
+    version = prepared / data / number
+    with TemporaryDirectory(
+        prefix="mlflow-triton-upload-", dir=prepared.parent
+    ) as directory:
+        target = Path(directory) / data / number
+        target.parent.mkdir(parents=True)
+        version.rename(target)
+        try:
+            client.log_model_artifacts(update.model_id, directory)
+        finally:
+            target.rename(version)
