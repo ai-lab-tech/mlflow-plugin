@@ -5,7 +5,11 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
+from packaging.version import Version
+
+_TORCH_PACKAGES = {"torch", "torchvision", "torchaudio"}
 
 
 def _read_requirements(path: Path, root: Path, active: frozenset[Path]):
@@ -25,10 +29,27 @@ def _read_requirements(path: Path, root: Path, active: frozenset[Path]):
             # MLflow normally writes '-c constraints.txt'. Also accept saved
             # requirement includes without leaving references in the output.
             if len(options) == 1:
-                for flag in ("--constraint=", "--requirement=", "-c", "-r"):
+                for flag in (
+                    "--constraint=",
+                    "--requirement=",
+                    "--find-links=",
+                    "-c",
+                    "-r",
+                    "-f",
+                ):
                     if options[0].startswith(flag):
                         options = [flag.rstrip("="), options[0][len(flag) :]]
                         break
+            if len(options) == 2 and options[0] in {"-f", "--find-links"}:
+                location = urlsplit(options[1])
+                if (
+                    location.scheme not in {"http", "https"}
+                    or not location.netloc
+                    or any(character.isspace() for character in options[1])
+                ):
+                    raise ValueError("Serving wheel sources must be HTTP(S) URLs")
+                yield "--find-links " + options[1]
+                continue
             if len(options) != 2 or options[0] not in {
                 "-c",
                 "--constraint",
@@ -54,18 +75,83 @@ def _read_requirements(path: Path, root: Path, active: frozenset[Path]):
         yield requirement
 
 
-def serving_requirements(package: Path, mlflow_version: str) -> str:
+def _torch_exact_pins(requirement):
+    if requirement.name not in _TORCH_PACKAGES or requirement.url:
+        return []
+    exact = [
+        spec
+        for spec in requirement.specifier
+        if spec.operator == "==" and "*" not in spec.version
+    ]
+    versions = {Version(spec.version).public for spec in exact}
+    local_versions = {
+        Version(spec.version).local
+        for spec in exact
+        if Version(spec.version).local is not None
+    }
+    if len(versions) != 1 or len(local_versions) > 1:
+        # Preserve unpinned user additions and conflicting version restrictions.
+        return []
+    return exact
+
+
+def _cpu_torch_requirement(requirement):
+    """Select CPU wheels without changing the public framework version.
+
+    A bare torch==X pin also matches CUDA wheels. The +cpu label makes GPU
+    fallback impossible; package-specific find-links makes those wheels visible
+    to pip without changing the package index for unrelated dependencies.
+    """
+    exact = _torch_exact_pins(requirement)
+    if not exact:
+        return None
+    cpu_pin = "==" + Version(exact[0].version).public + "+cpu"
+    requirement.specifier = SpecifierSet(
+        ",".join(
+            cpu_pin if spec in exact else str(spec) for spec in requirement.specifier
+        )
+    )
+    return f"--find-links https://download.pytorch.org/whl/cpu/{requirement.name}/"
+
+
+def _exclude_cpu_torch_requirement(requirement):
+    exact = _torch_exact_pins(requirement)
+    if not exact:
+        return
+    public = Version(exact[0].version).public
+    specs = [
+        "==" + public
+        if spec in exact and Version(spec.version).local == "cpu"
+        else str(spec)
+        for spec in requirement.specifier
+    ]
+    # An installed +cpu build satisfies a plain ==public pin. Exclude it so
+    # image-package reuse cannot silently retain that build for a GPU model.
+    requirement.specifier = SpecifierSet(",".join([*specs, "!=" + public + "+cpu"]))
+
+
+def serving_requirements(
+    package: Path,
+    mlflow_version: str,
+    *,
+    prefer_cpu_torch: bool = False,
+    exclude_cpu_torch: bool = False,
+) -> str:
     """Promote constraints to dependencies so the API needs only one text file.
 
     Constraints for packages not otherwise required deliberately become explicit
     serving dependencies. Markers are retained for evaluation on the serving host.
     No dependency resolution, installation or network access happens here.
     """
+    if prefer_cpu_torch and exclude_cpu_torch:
+        raise ValueError("CPU and GPU Torch wheel policies are mutually exclusive")
     root = package.resolve()
     source = root / "requirements.txt"
-    requirements = (
+    entries = (
         list(_read_requirements(source, root, frozenset())) if source.exists() else []
     )
+    wheel_sources = dict.fromkeys(item for item in entries if isinstance(item, str))
+    requirements = [item for item in entries if isinstance(item, Requirement)]
     mlflow_requirements = [
         item
         for item in requirements
@@ -95,4 +181,11 @@ def serving_requirements(package: Path, mlflow_version: str) -> str:
             previous.url = next(iter(urls))
         previous.specifier &= requirement.specifier
         previous.extras |= requirement.extras
-    return "".join(f"{requirement}\n" for requirement in merged.values())
+    if prefer_cpu_torch:
+        for requirement in merged.values():
+            if source := _cpu_torch_requirement(requirement):
+                wheel_sources[source] = None
+    elif exclude_cpu_torch:
+        for requirement in merged.values():
+            _exclude_cpu_torch_requirement(requirement)
+    return "".join(f"{line}\n" for line in [*wheel_sources, *merged.values()])

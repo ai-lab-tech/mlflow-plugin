@@ -368,11 +368,36 @@ Bundled local code still requires `code_paths`. Explicit `pip_requirements` and
 `conda_env` bypass capture. With `validate_saved_model=True`, native MLflow
 dependency inference applies instead, and may reload the model in a subprocess.
 
+For `device="cpu"`, automatically generated serving requirements select the
+CPU builds of exactly pinned `torch`, `torchvision`, and `torchaudio`, preserving
+their public version numbers. For example:
+
+```text
+--find-links https://download.pytorch.org/whl/cpu/torch/
+torch==2.14.1+cpu
+```
+
+The package-specific wheel source and `+cpu` pin prevent an ordinary
+`pip install -r requirements.txt` from choosing a CUDA build. A compatible CPU
+wheel must exist for the serving Python/platform; installation fails instead of
+silently changing framework versions or falling back to a GPU build. Matching
+installed CPU packages can be reused by pip. Explicit `pip_requirements`,
+`conda_env`, and direct wheel URLs retain their specified builds. Automatic GPU
+requirements preserve the public framework version and exclude the corresponding
+`+cpu` build, so an installed CPU-only Torch is not reused merely because its
+public version matches. Use explicit requirements to choose a particular CUDA
+build. Native MLflow environment files remain unchanged.
+
+Deployments through Triton Control need a backend supporting HTTP(S)
+`--find-links` entries. Older backends accepting only PEP 508 package lines
+reject these entries; update the backend before deploying generated CPU pins.
+
 The serving `requirements.txt` is standalone: requirements and constraints from
 MLflow's saved environment are combined into package requirements, without `-r`
 or `-c` file references. Constraint-only packages become explicit serving
 dependencies and will also be installed. Version restrictions and environment
-markers are retained. Unsupported pip options or local file dependencies fail
+markers and HTTP(S) `--find-links` sources are retained. Other unsupported pip
+options or local file dependencies fail
 packaging rather than producing an unusable deployment file. MLflow's native
 environment files inside the saved artifact remain unchanged.
 If MLflow is specified only conditionally, the serving file also requires

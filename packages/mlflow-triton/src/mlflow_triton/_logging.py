@@ -176,6 +176,9 @@ def _assemble_repository(
     input_example,
     validate_saved_model,
     validation_device,
+    *,
+    prefer_cpu_torch=False,
+    exclude_cpu_torch=False,
 ):
     # Make only the independent serving copy. Move directories on the same disk
     # instead of recopying the complete package into its final location.
@@ -192,7 +195,13 @@ def _assemble_repository(
     (repository / "config.pbtxt").write_text(config)
     write_request_example(repository, input_example, contract)
     (version / "requirements.txt").write_text(
-        serving_requirements(package, mlflow.__version__), encoding="utf-8"
+        serving_requirements(
+            package,
+            mlflow.__version__,
+            prefer_cpu_torch=prefer_cpu_torch,
+            exclude_cpu_torch=exclude_cpu_torch,
+        ),
+        encoding="utf-8",
     )
     (repository / "validation.json").write_text(
         json.dumps(
@@ -251,6 +260,10 @@ def prepare_model(
         raise ValueError("Destination already exists: " + str(destination))
     destination.parent.mkdir(parents=True, exist_ok=True)
     native_flavor = importlib.import_module("mlflow." + flavor)
+    automatic_requirements = (
+        save_kwargs.get("pip_requirements") is None
+        and save_kwargs.get("conda_env") is None
+    )
     # A sibling staging directory guarantees rename stays on the same filesystem.
     # TemporaryDirectory removes incomplete copies after any packaging failure.
     with tempfile.TemporaryDirectory(
@@ -265,10 +278,7 @@ def prepare_model(
                 native_flavor, flavor, model, signature, save_kwargs
             )
             dependencies = PredictionDependencies()
-            if (
-                save_kwargs.get("pip_requirements") is None
-                and save_kwargs.get("conda_env") is None
-            ):
+            if automatic_requirements:
                 with dependencies.capture():
                     output = predictor.predict(input_example)
                 observed = dependencies.requirements()
@@ -305,6 +315,8 @@ def prepare_model(
             input_example,
             validate_saved_model,
             validation_device,
+            prefer_cpu_torch=automatic_requirements and device == "cpu",
+            exclude_cpu_torch=automatic_requirements and device == "gpu",
         )
         if destination.exists() or destination.is_symlink():
             raise FileExistsError("Destination already exists: " + str(destination))
