@@ -33,6 +33,7 @@ info = sklearn.log_model(
     fitted_pipeline,
     name="classifier",
     input_example=example_dataframe,
+    device="cpu",  # Serving target; CPU is the default
     registered_model_name="classifier",  # Optional: create a Registry version
 )
 print(info.model_uri)
@@ -49,6 +50,7 @@ info = pytorch.log_model(
     loaded_model.eval(),
     name="network",
     input_example=example_numpy_array,
+    device="cpu",  # Select CPU serving and automatic CPU Torch wheels
 )
 ```
 
@@ -68,6 +70,7 @@ info = transformers.log_model(
     name="text_generator",
     input_example=["Explain what a model signature describes."],
     task="text-generation",
+    device="cpu",  # Use "gpu" for GPU serving
     model_config={"max_new_tokens": 32, "do_sample": False},
 )
 ```
@@ -190,6 +193,31 @@ must be keyword arguments.
 `input_example` must be non-empty and is required even with an explicit signature.
 It is prediction input, not a Triton HTTP request. Its values are saved in the
 artifact and generated request files, so use non-sensitive examples.
+
+### Choose CPU or GPU serving
+
+Pass `device` directly to the framework's `log_model()` call. If omitted,
+`device="cpu"` is used; the training machine's hardware does not select it.
+For example, to package a PyTorch model for GPU serving:
+
+```python
+info = pytorch.log_model(
+    loaded_model.eval(),
+    name="network",
+    input_example=example_numpy_array,
+    device="gpu",
+)
+```
+
+Use `device="cpu"` for CPU serving. PyTorch and Transformers support both targets;
+scikit-learn supports CPU only. The setting controls the generated Triton instance
+configuration and automatic Torch wheel selection. It does not move the supplied
+model: the example prediction still runs on its existing device.
+
+For automatic requirements, CPU serving selects pinned `+cpu` Torch wheels;
+GPU serving excludes CPU-only builds but does not select a specific CUDA build.
+Explicit `pip_requirements` or `conda_env` preserve your chosen dependencies.
+See the Torch wheel-selection details below for wheel-source requirements.
 
 ### Common optional arguments
 
