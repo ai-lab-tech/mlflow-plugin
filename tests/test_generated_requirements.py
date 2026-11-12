@@ -64,7 +64,9 @@ class GeneratedRequirementsTests(unittest.TestCase):
             infos.append(info)
             self.assertEqual(int(info.registered_model_version), number)
             self.assertEqual(info.flavors["triton"]["model_version"], number)
-            path = Path(mlflow.artifacts.download_artifacts(artifact_uri=info.model_uri))
+            path = Path(
+                mlflow.artifacts.download_artifacts(artifact_uri=info.model_uri)
+            )
             repository = path / "model_repository/model"
             self.assertFalse((repository / "requirements.txt").exists())
             content = (repository / str(number) / "requirements.txt").read_text()
@@ -72,7 +74,9 @@ class GeneratedRequirementsTests(unittest.TestCase):
             requirements.append(content)
 
         self.assertNotEqual(infos[0].model_id, infos[1].model_id)
-        owner = Path(mlflow.artifacts.download_artifacts(artifact_uri=infos[0].model_uri))
+        owner = Path(
+            mlflow.artifacts.download_artifacts(artifact_uri=infos[0].model_uri)
+        )
         resolve_uri = resolver._artifact_uri
 
         def local_uri(uri):
@@ -81,12 +85,16 @@ class GeneratedRequirementsTests(unittest.TestCase):
 
         for number in (1, 2):
             self.assertEqual(
-                (owner / f"model_repository/model/{number}/requirements.txt").read_text(),
+                (
+                    owner / f"model_repository/model/{number}/requirements.txt"
+                ).read_text(),
                 requirements[number - 1],
             )
             with (
                 patch.object(resolver, "_artifact_uri", side_effect=local_uri),
-                patch.object(resolver, "_s3_location", return_value="s3://bucket/owner"),
+                patch.object(
+                    resolver, "_s3_location", return_value="s3://bucket/owner"
+                ),
             ):
                 artifacts = resolver.resolve_deployment_artifacts(
                     f"models:/captured/{number}"
