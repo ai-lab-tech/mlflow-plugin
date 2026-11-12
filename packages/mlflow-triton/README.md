@@ -33,6 +33,7 @@ info = sklearn.log_model(
     fitted_pipeline,
     name="classifier",
     input_example=example_dataframe,
+    device="cpu",  # Serving target; CPU is the default
     registered_model_name="classifier",  # Optional: create a Registry version
 )
 print(info.model_uri)
@@ -49,6 +50,7 @@ info = pytorch.log_model(
     loaded_model.eval(),
     name="network",
     input_example=example_numpy_array,
+    device="cpu",  # Select CPU serving and automatic CPU Torch wheels
 )
 ```
 
@@ -68,6 +70,7 @@ info = transformers.log_model(
     name="text_generator",
     input_example=["Explain what a model signature describes."],
     task="text-generation",
+    device="cpu",  # Use "gpu" for GPU serving
     model_config={"max_new_tokens": 32, "do_sample": False},
 )
 ```
@@ -191,6 +194,31 @@ must be keyword arguments.
 It is prediction input, not a Triton HTTP request. Its values are saved in the
 artifact and generated request files, so use non-sensitive examples.
 
+### Choose CPU or GPU serving
+
+Pass `device` directly to the framework's `log_model()` call. If omitted,
+`device="cpu"` is used; the training machine's hardware does not select it.
+For example, to package a PyTorch model for GPU serving:
+
+```python
+info = pytorch.log_model(
+    loaded_model.eval(),
+    name="network",
+    input_example=example_numpy_array,
+    device="gpu",
+)
+```
+
+Use `device="cpu"` for CPU serving. PyTorch and Transformers support both targets;
+scikit-learn supports CPU only. The setting controls the generated Triton instance
+configuration and automatic Torch wheel selection. It does not move the supplied
+model: the example prediction still runs on its existing device.
+
+For automatic requirements, CPU serving selects pinned `+cpu` Torch wheels;
+GPU serving excludes CPU-only builds but does not select a specific CUDA build.
+Explicit `pip_requirements` or `conda_env` preserve your chosen dependencies.
+See the Torch wheel-selection details below for wheel-source requirements.
+
 ### Common optional arguments
 
 | Argument | Default | Purpose |
@@ -259,7 +287,7 @@ dependencies or configure serialization.
 | Argument | Framework | Default / purpose |
 | --- | --- | --- |
 | `code_paths` | All | `None`. Local inference-code files or directories to bundle. Preserve their importable package structure. |
-| `pip_requirements` | All | `None`. Requirements list or file path; otherwise uses MLflow's default framework dependencies. |
+| `pip_requirements` | All | `None`. Requirements list or file path; otherwise combines MLflow's framework defaults with dependencies observed during the example prediction. |
 | `extra_pip_requirements` | All | `None`. Add dependencies to the default or inferred requirements. |
 | `conda_env` | All | `None`. Environment dictionary or file path. Follow MLflow's restrictions on combining environment arguments. |
 | `pyfunc_predict_fn` | sklearn | `"predict"`. Prediction method, for example `"predict_proba"`. Also determines the output used to infer the signature. |
@@ -344,11 +372,60 @@ version's complete recorded Python requirements, including MLflow used by the
 backend; it is not a delta. The artifact-root `requirements.txt` belongs to the
 native MLflow model and is not needed for Triton serving. Do not merge the files.
 
+By default, dependencies are observed during the existing in-memory example
+prediction, including packages referenced through already-imported modules and
+cached callables. Only executed accesses and successful imports are observed;
+names in an unexecuted training branch are not added. Shared package namespaces
+are resolved to the distribution owning the observed module. Observed
+distributions are pinned to their installed versions
+and combined with MLflow's framework defaults; the backend's NumPy and pandas
+dependencies are included too. This does not reload the model, copy weights, or
+export the entire training environment. Installed packages with matching versions
+can be reused in the Triton image. Captured requirements are written into each
+Triton version's `<version>/requirements.txt`; compatible updates retain the
+previous versions' files. `mlflow-triton-control` 0.4.6 already reads the file
+selected by the logged model's `model_version`, including shared repositories.
+
+Capture uses Python instruction tracing during this one prediction and adds CPU
+overhead to packaging, not to the generated serving backend. Existing profilers
+remain active. Capture is sample-based and runs on the prediction thread; it is
+not a complete dependency lock. Add dependencies for unexercised paths, loading
+or serialization-only code, opaque native code, or work in other threads/processes
+with `extra_pip_requirements`.
+Bundled local code still requires `code_paths`. Explicit `pip_requirements` and
+`conda_env` bypass capture. With `validate_saved_model=True`, native MLflow
+dependency inference applies instead, and may reload the model in a subprocess.
+
+For `device="cpu"`, automatically generated serving requirements select the
+CPU builds of exactly pinned `torch`, `torchvision`, and `torchaudio`, preserving
+their public version numbers. For example:
+
+```text
+--find-links https://download.pytorch.org/whl/cpu/torch/
+torch==2.14.1+cpu
+```
+
+The package-specific wheel source and `+cpu` pin prevent an ordinary
+`pip install -r requirements.txt` from choosing a CUDA build. A compatible CPU
+wheel must exist for the serving Python/platform; installation fails instead of
+silently changing framework versions or falling back to a GPU build. Matching
+installed CPU packages can be reused by pip. Explicit `pip_requirements`,
+`conda_env`, and direct wheel URLs retain their specified builds. Automatic GPU
+requirements preserve the public framework version and exclude the corresponding
+`+cpu` build, so an installed CPU-only Torch is not reused merely because its
+public version matches. Use explicit requirements to choose a particular CUDA
+build. Native MLflow environment files remain unchanged.
+
+Deployments through Triton Control need a backend supporting HTTP(S)
+`--find-links` entries. Older backends accepting only PEP 508 package lines
+reject these entries; update the backend before deploying generated CPU pins.
+
 The serving `requirements.txt` is standalone: requirements and constraints from
 MLflow's saved environment are combined into package requirements, without `-r`
 or `-c` file references. Constraint-only packages become explicit serving
 dependencies and will also be installed. Version restrictions and environment
-markers are retained. Unsupported pip options or local file dependencies fail
+markers and HTTP(S) `--find-links` sources are retained. Other unsupported pip
+options or local file dependencies fail
 packaging rather than producing an unusable deployment file. MLflow's native
 environment files inside the saved artifact remain unchanged.
 If MLflow is specified only conditionally, the serving file also requires

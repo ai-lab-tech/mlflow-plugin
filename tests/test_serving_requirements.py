@@ -164,3 +164,101 @@ class ServingRequirementsTests(unittest.TestCase):
 
         # Assert
         self.assertEqual(text, "mlflow-skinny==3.14.0\n")
+
+    def test_automatic_cpu_torch_pins_cannot_select_a_cuda_build(self):
+        (self.root / "requirements.txt").write_text(
+            "torch==2.14.1\ntorchvision==0.29.1\n"
+            'torchaudio==2.9.0; python_version < "3.14"\n'
+        )
+        text = serving_requirements(self.root, "3.17.2", prefer_cpu_torch=True)
+        requirements = {
+            item.name: item
+            for item in map(
+                Requirement,
+                (line for line in text.splitlines() if not line.startswith("-")),
+            )
+        }
+        self.assertIn("2.14.1+cpu", requirements["torch"].specifier)
+        self.assertNotIn("2.14.1", requirements["torch"].specifier)
+        self.assertNotIn("2.14.1+cu130", requirements["torch"].specifier)
+        self.assertEqual(str(requirements["torchvision"].specifier), "==0.29.1+cpu")
+        self.assertIsNotNone(requirements["torchaudio"].marker)
+        for package in ("torch", "torchvision", "torchaudio"):
+            self.assertIn(
+                f"--find-links https://download.pytorch.org/whl/cpu/{package}/", text
+            )
+        self.assertNotIn("--index-url", text)
+        self.assertNotIn("--extra-index-url", text)
+
+    def test_cpu_wheel_selection_preserves_public_version_and_other_constraints(self):
+        (self.root / "requirements.txt").write_text(
+            "torch==2.9.0+cu128\n-c constraints.txt\n"
+        )
+        (self.root / "constraints.txt").write_text("torch<3\n")
+        text = serving_requirements(self.root, "3.17.2", prefer_cpu_torch=True)
+        self.assertIn("torch<3,==2.9.0+cpu", text)
+        self.assertIn(
+            "torch==2.9.0+cu128", (self.root / "requirements.txt").read_text()
+        )
+
+    def test_explicit_or_gpu_requirements_keep_the_selected_build(self):
+        (self.root / "requirements.txt").write_text("torch==2.14.1+cu130\n")
+        text = serving_requirements(self.root, "3.17.2")
+        self.assertIn("torch==2.14.1+cu130", text)
+        self.assertNotIn("find-links", text)
+
+    def test_automatic_gpu_requirements_do_not_reuse_an_installed_cpu_build(self):
+        for version in ("2.14.1", "2.14.1+cpu", "2.14.1+cu130"):
+            with self.subTest(version=version):
+                (self.root / "requirements.txt").write_text(f"torch=={version}\n")
+                text = serving_requirements(self.root, "3.17.2", exclude_cpu_torch=True)
+                torch = next(
+                    item
+                    for item in map(Requirement, text.splitlines())
+                    if item.name == "torch"
+                )
+                self.assertNotIn("2.14.1+cpu", torch.specifier)
+                self.assertIn("2.14.1+cu130", torch.specifier)
+                self.assertNotIn("find-links", text)
+
+    def test_cpu_policy_does_not_override_direct_wheel_urls(self):
+        original = "torch @ https://wheels.example.test/torch-custom.whl"
+        (self.root / "requirements.txt").write_text(original + "\n")
+        text = serving_requirements(self.root, "3.17.2", prefer_cpu_torch=True)
+        self.assertEqual(Requirement(text.splitlines()[0]), Requirement(original))
+        self.assertNotIn("find-links", text)
+
+    def test_remote_wheel_sources_survive_flattening_and_are_deduplicated(self):
+        source = "https://download.pytorch.org/whl/cpu/torch/"
+        (self.root / "requirements.txt").write_text(
+            f"--find-links={source}\n-r nested.txt\n"
+        )
+        (self.root / "nested.txt").write_text(f"-f {source}\ntorch==2.14.1+cpu\n")
+        text = serving_requirements(self.root, "3.17.2", prefer_cpu_torch=True)
+        self.assertEqual(text.count("--find-links"), 1)
+        self.assertIn("torch==2.14.1+cpu", text)
+        (self.root / "requirements.txt").write_text(text)
+        self.assertEqual(serving_requirements(self.root, "3.17.2"), text)
+
+    def test_local_wheel_sources_are_rejected(self):
+        for source in ("/tmp/wheels", "file:///tmp/wheels"):
+            with self.subTest(source=source):
+                (self.root / "requirements.txt").write_text(f"--find-links {source}\n")
+                with self.assertRaisesRegex(ValueError, "HTTP"):
+                    serving_requirements(self.root, "3.17.2")
+
+    def test_cpu_policy_does_not_hide_conflicting_framework_pins(self):
+        for pins in (
+            "torch==2.9.0\ntorch==2.10.0\n",
+            "torch==2.9.0+cpu\ntorch==2.9.0+cu128\n",
+        ):
+            with self.subTest(pins=pins):
+                (self.root / "requirements.txt").write_text(pins)
+                text = serving_requirements(self.root, "3.17.2", prefer_cpu_torch=True)
+                self.assertNotIn("find-links", text)
+                self.assertIn(
+                    ",",
+                    next(
+                        line for line in text.splitlines() if line.startswith("torch")
+                    ),
+                )

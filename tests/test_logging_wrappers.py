@@ -270,11 +270,14 @@ class LoggingWrapperTests(unittest.TestCase):
         self.assertEqual(metadata.signature, signature)
 
     def test_default_logging_skips_model_loading_and_dependency_inference(self):
+        import yaml
+
         model = fixture_model()
         calls = []
         original_predict = Pipeline.predict
 
         def predict(instance, values, **kwargs):
+            yaml.safe_load("serving: true")
             calls.append(instance)
             return original_predict(instance, values, **kwargs)
 
@@ -287,6 +290,9 @@ class LoggingWrapperTests(unittest.TestCase):
             )
             captured["report"] = report
             captured["requirements"] = (path / "requirements.txt").read_text()
+            captured["serving_requirements"] = (
+                path / "model_repository/model/1/requirements.txt"
+            ).read_text()
             return "logged"
 
         with (
@@ -309,9 +315,51 @@ class LoggingWrapperTests(unittest.TestCase):
         self.assertEqual(captured["report"]["saved_artifact_validation"], "not_run")
         self.assertIn("scikit-learn==", captured["requirements"])
         self.assertIn("cloudpickle==", captured["requirements"])
+        self.assertIn("pyyaml==", captured["requirements"].lower())
+        self.assertIn("pyyaml==", captured["serving_requirements"])
         self.assertEqual(result, "logged")
         self.assertEqual(len(calls), 1)
         self.assertIs(calls[0], model)
+
+    def test_explicit_requirements_skip_in_memory_dependency_capture(self):
+        with patch(
+            "mlflow_triton._logging.PredictionDependencies.capture",
+            side_effect=AssertionError("explicit environment must bypass capture"),
+        ):
+            self.prepare()
+
+    def test_cpu_wheel_selection_is_applied_only_to_automatic_serving_requirements(
+        self,
+    ):
+        for explicit in (False, True):
+            with self.subTest(explicit=explicit):
+                path = self.root / f"cpu-wheels-{explicit}"
+                options = (
+                    {"pip_requirements": ["scikit-learn", "torch==2.14.1"]}
+                    if explicit
+                    else {"extra_pip_requirements": ["torch==2.14.1"]}
+                )
+                _logging.prepare_model(
+                    "sklearn",
+                    fixture_model(),
+                    path,
+                    input_example=self.example,
+                    **options,
+                )
+                native = (path / "requirements.txt").read_text()
+                serving = (
+                    path / "model_repository/model/1/requirements.txt"
+                ).read_text()
+                self.assertIn("torch==2.14.1", native)
+                self.assertNotIn("+cpu", native)
+                if explicit:
+                    self.assertNotIn("+cpu", serving)
+                    self.assertNotIn("find-links", serving)
+                else:
+                    self.assertIn("torch==2.14.1+cpu", serving)
+                    self.assertIn(
+                        "https://download.pytorch.org/whl/cpu/torch/", serving
+                    )
 
     def test_default_requirements_keep_extra_requirements_and_constraints(self):
         # Arrange
@@ -351,7 +399,8 @@ class LoggingWrapperTests(unittest.TestCase):
                         item.name: item
                         for item in map(Requirement, serving_requirements.splitlines())
                     }
-                    self.assertEqual(str(serving["numpy"].specifier), ">=1")
+                    self.assertIn(">=1", str(serving["numpy"].specifier))
+                    self.assertIn(np.__version__, serving["numpy"].specifier)
                     self.assertIn(
                         "numpy>=1",
                         (repository / "1/artifact/constraints.txt").read_text(),

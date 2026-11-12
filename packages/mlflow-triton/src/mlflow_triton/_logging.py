@@ -15,6 +15,7 @@ from mlflow.models import Model, infer_signature
 
 from . import _runtime
 from ._architecture import validate_init_kwargs, write_architecture
+from ._dependencies import PredictionDependencies
 from ._request import write_request_example
 from ._requirements import serving_requirements
 from ._signature import config_text, contract_from_signature, validate_serving_options
@@ -91,7 +92,7 @@ def _in_memory_predictor(native_flavor, flavor, model, signature, save_kwargs):
     return model, predictor, validation_device
 
 
-def _set_default_requirements(native_flavor, flavor, model, save_kwargs):
+def _set_default_requirements(native_flavor, flavor, model, save_kwargs, observed=()):
     """Avoid native dependency inference, which reloads models in a subprocess."""
     if (
         save_kwargs.get("pip_requirements") is not None
@@ -110,6 +111,7 @@ def _set_default_requirements(native_flavor, flavor, model, save_kwargs):
         requirements = native_flavor.get_default_pip_requirements(**options)
     else:
         requirements = native_flavor.get_default_pip_requirements()
+    requirements = list(dict.fromkeys([*requirements, *observed]))
     extra = save_kwargs.pop("extra_pip_requirements", None)
     if extra is not None:
         requirements = [
@@ -174,6 +176,9 @@ def _assemble_repository(
     input_example,
     validate_saved_model,
     validation_device,
+    *,
+    prefer_cpu_torch=False,
+    exclude_cpu_torch=False,
 ):
     # Make only the independent serving copy. Move directories on the same disk
     # instead of recopying the complete package into its final location.
@@ -190,7 +195,13 @@ def _assemble_repository(
     (repository / "config.pbtxt").write_text(config)
     write_request_example(repository, input_example, contract)
     (version / "requirements.txt").write_text(
-        serving_requirements(package, mlflow.__version__), encoding="utf-8"
+        serving_requirements(
+            package,
+            mlflow.__version__,
+            prefer_cpu_torch=prefer_cpu_torch,
+            exclude_cpu_torch=exclude_cpu_torch,
+        ),
+        encoding="utf-8",
     )
     (repository / "validation.json").write_text(
         json.dumps(
@@ -249,6 +260,10 @@ def prepare_model(
         raise ValueError("Destination already exists: " + str(destination))
     destination.parent.mkdir(parents=True, exist_ok=True)
     native_flavor = importlib.import_module("mlflow." + flavor)
+    automatic_requirements = (
+        save_kwargs.get("pip_requirements") is None
+        and save_kwargs.get("conda_env") is None
+    )
     # A sibling staging directory guarantees rename stays on the same filesystem.
     # TemporaryDirectory removes incomplete copies after any packaging failure.
     with tempfile.TemporaryDirectory(
@@ -262,10 +277,19 @@ def prepare_model(
             model, predictor, validation_device = _in_memory_predictor(
                 native_flavor, flavor, model, signature, save_kwargs
             )
-            output = predictor.predict(input_example)
+            dependencies = PredictionDependencies()
+            if automatic_requirements:
+                with dependencies.capture():
+                    output = predictor.predict(input_example)
+                observed = dependencies.requirements()
+            else:
+                output = predictor.predict(input_example)
+                observed = ()
             if selected is None:
                 selected = infer_signature(input_example, output)
-            _set_default_requirements(native_flavor, flavor, model, save_kwargs)
+            _set_default_requirements(
+                native_flavor, flavor, model, save_kwargs, observed
+            )
         native_flavor.save_model(
             model,
             str(native),
@@ -291,6 +315,8 @@ def prepare_model(
             input_example,
             validate_saved_model,
             validation_device,
+            prefer_cpu_torch=automatic_requirements and device == "cpu",
+            exclude_cpu_torch=automatic_requirements and device == "gpu",
         )
         if destination.exists() or destination.is_symlink():
             raise FileExistsError("Destination already exists: " + str(destination))
