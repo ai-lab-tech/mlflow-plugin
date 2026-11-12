@@ -259,7 +259,7 @@ dependencies or configure serialization.
 | Argument | Framework | Default / purpose |
 | --- | --- | --- |
 | `code_paths` | All | `None`. Local inference-code files or directories to bundle. Preserve their importable package structure. |
-| `pip_requirements` | All | `None`. Requirements list or file path; otherwise uses MLflow's default framework dependencies. |
+| `pip_requirements` | All | `None`. Requirements list or file path; otherwise combines MLflow's framework defaults with dependencies observed during the example prediction. |
 | `extra_pip_requirements` | All | `None`. Add dependencies to the default or inferred requirements. |
 | `conda_env` | All | `None`. Environment dictionary or file path. Follow MLflow's restrictions on combining environment arguments. |
 | `pyfunc_predict_fn` | sklearn | `"predict"`. Prediction method, for example `"predict_proba"`. Also determines the output used to infer the signature. |
@@ -343,6 +343,30 @@ example, `2/requirements.txt` for Triton version 2). Each file contains that
 version's complete recorded Python requirements, including MLflow used by the
 backend; it is not a delta. The artifact-root `requirements.txt` belongs to the
 native MLflow model and is not needed for Triton serving. Do not merge the files.
+
+By default, dependencies are observed during the existing in-memory example
+prediction, including packages referenced through already-imported modules and
+cached callables. Only executed accesses and successful imports are observed;
+names in an unexecuted training branch are not added. Shared package namespaces
+are resolved to the distribution owning the observed module. Observed
+distributions are pinned to their installed versions
+and combined with MLflow's framework defaults; the backend's NumPy and pandas
+dependencies are included too. This does not reload the model, copy weights, or
+export the entire training environment. Installed packages with matching versions
+can be reused in the Triton image. Captured requirements are written into each
+Triton version's `<version>/requirements.txt`; compatible updates retain the
+previous versions' files. `mlflow-triton-control` 0.4.6 already reads the file
+selected by the logged model's `model_version`, including shared repositories.
+
+Capture uses Python instruction tracing during this one prediction and adds CPU
+overhead to packaging, not to the generated serving backend. Existing profilers
+remain active. Capture is sample-based and runs on the prediction thread; it is
+not a complete dependency lock. Add dependencies for unexercised paths, loading
+or serialization-only code, opaque native code, or work in other threads/processes
+with `extra_pip_requirements`.
+Bundled local code still requires `code_paths`. Explicit `pip_requirements` and
+`conda_env` bypass capture. With `validate_saved_model=True`, native MLflow
+dependency inference applies instead, and may reload the model in a subprocess.
 
 The serving `requirements.txt` is standalone: requirements and constraints from
 MLflow's saved environment are combined into package requirements, without `-r`

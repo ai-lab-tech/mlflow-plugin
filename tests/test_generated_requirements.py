@@ -7,12 +7,25 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import mlflow
+import numpy as np
 from mlflow.exceptions import MlflowException
 from mlflow.models import Model
+from mlflow.utils.file_utils import local_file_uri_to_path
+from mlflow_triton import sklearn
 from mlflow_triton._requirements import serving_requirements
 from mlflow_triton_control import _model_uri as resolver
 from mlflow_triton_control.deployment_client import TritonControlDeploymentClient
 from packaging.requirements import Requirement
+from sklearn.dummy import DummyRegressor
+
+
+class CapturedDependencyRegressor(DummyRegressor):
+    def predict(self, values):
+        if self.constant == 2:
+            import yaml
+
+            yaml.safe_load("serving: true")
+        return super().predict(values)
 
 
 class GeneratedRequirementsTests(unittest.TestCase):
@@ -22,6 +35,66 @@ class GeneratedRequirementsTests(unittest.TestCase):
         self.repository = Path(self.temporary.name) / "classifier"
         self.repository.mkdir()
         self.uri = self.repository.as_uri()
+
+    def test_captured_requirements_follow_registered_versions_into_deployment(self):
+        tracking, registry = mlflow.get_tracking_uri(), mlflow.get_registry_uri()
+        self.addCleanup(mlflow.set_tracking_uri, tracking)
+        self.addCleanup(mlflow.set_registry_uri, registry)
+        root = Path(self.temporary.name)
+        uri = "sqlite:///" + str(root / "tracking.db")
+        mlflow.set_tracking_uri(uri)
+        mlflow.set_registry_uri(uri)
+        experiment = mlflow.create_experiment(
+            "capture-versions", artifact_location=(root / "artifacts").as_uri()
+        )
+        values = np.array([[1.0], [2.0]])
+        infos = []
+        requirements = []
+        for number in (1, 2):
+            model = CapturedDependencyRegressor(
+                strategy="constant", constant=number
+            ).fit(values, [0, 0])
+            with mlflow.start_run(experiment_id=experiment):
+                info = sklearn.log_model(
+                    model,
+                    input_example=values,
+                    registered_model_name="captured",
+                    serialization_format="cloudpickle",
+                )
+            infos.append(info)
+            self.assertEqual(int(info.registered_model_version), number)
+            self.assertEqual(info.flavors["triton"]["model_version"], number)
+            path = Path(mlflow.artifacts.download_artifacts(artifact_uri=info.model_uri))
+            repository = path / "model_repository/model"
+            self.assertFalse((repository / "requirements.txt").exists())
+            content = (repository / str(number) / "requirements.txt").read_text()
+            self.assertEqual("pyyaml==" in content.lower(), number == 2)
+            requirements.append(content)
+
+        self.assertNotEqual(infos[0].model_id, infos[1].model_id)
+        owner = Path(mlflow.artifacts.download_artifacts(artifact_uri=infos[0].model_uri))
+        resolve_uri = resolver._artifact_uri
+
+        def local_uri(uri):
+            # Exercise real Registry resolution while using local test storage.
+            return local_file_uri_to_path(resolve_uri(uri))
+
+        for number in (1, 2):
+            self.assertEqual(
+                (owner / f"model_repository/model/{number}/requirements.txt").read_text(),
+                requirements[number - 1],
+            )
+            with (
+                patch.object(resolver, "_artifact_uri", side_effect=local_uri),
+                patch.object(resolver, "_s3_location", return_value="s3://bucket/owner"),
+            ):
+                artifacts = resolver.resolve_deployment_artifacts(
+                    f"models:/captured/{number}"
+                )
+            self.assertEqual(artifacts.requirements_txt, requirements[number - 1])
+            self.assertEqual(
+                artifacts.repository_uri, "s3://bucket/owner/model_repository/model"
+            )
 
     def test_reads_generated_file_with_real_mlflow_artifact_api(self):
         expected = "mlflow==3.14.0\nscikit-learn==1.7.2\ncloudpickle==3.1.2\n"

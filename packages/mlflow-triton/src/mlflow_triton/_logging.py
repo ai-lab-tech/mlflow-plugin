@@ -15,6 +15,7 @@ from mlflow.models import Model, infer_signature
 
 from . import _runtime
 from ._architecture import validate_init_kwargs, write_architecture
+from ._dependencies import PredictionDependencies
 from ._request import write_request_example
 from ._requirements import serving_requirements
 from ._signature import config_text, contract_from_signature, validate_serving_options
@@ -91,7 +92,7 @@ def _in_memory_predictor(native_flavor, flavor, model, signature, save_kwargs):
     return model, predictor, validation_device
 
 
-def _set_default_requirements(native_flavor, flavor, model, save_kwargs):
+def _set_default_requirements(native_flavor, flavor, model, save_kwargs, observed=()):
     """Avoid native dependency inference, which reloads models in a subprocess."""
     if (
         save_kwargs.get("pip_requirements") is not None
@@ -110,6 +111,7 @@ def _set_default_requirements(native_flavor, flavor, model, save_kwargs):
         requirements = native_flavor.get_default_pip_requirements(**options)
     else:
         requirements = native_flavor.get_default_pip_requirements()
+    requirements = list(dict.fromkeys([*requirements, *observed]))
     extra = save_kwargs.pop("extra_pip_requirements", None)
     if extra is not None:
         requirements = [
@@ -262,10 +264,22 @@ def prepare_model(
             model, predictor, validation_device = _in_memory_predictor(
                 native_flavor, flavor, model, signature, save_kwargs
             )
-            output = predictor.predict(input_example)
+            dependencies = PredictionDependencies()
+            if (
+                save_kwargs.get("pip_requirements") is None
+                and save_kwargs.get("conda_env") is None
+            ):
+                with dependencies.capture():
+                    output = predictor.predict(input_example)
+                observed = dependencies.requirements()
+            else:
+                output = predictor.predict(input_example)
+                observed = ()
             if selected is None:
                 selected = infer_signature(input_example, output)
-            _set_default_requirements(native_flavor, flavor, model, save_kwargs)
+            _set_default_requirements(
+                native_flavor, flavor, model, save_kwargs, observed
+            )
         native_flavor.save_model(
             model,
             str(native),
