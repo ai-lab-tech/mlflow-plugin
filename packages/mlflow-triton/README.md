@@ -84,6 +84,14 @@ are stored at `info.model_uri`; no additional save or load call is needed.
 `info.registered_model_version` identifies the Registry version when requested.
 Logging does not start Triton or deploy a service.
 
+## Log an already-prepared serving repository
+
+Use `from mlflow_triton import serving` and `serving.log_model(...)` to publish
+a prepared Triton repository with explicit source and engineering-predecessor
+lineage. This API requires the `serving` extra and a durable publication receipt
+database. See [Prepared serving models](SERVING.md) for setup, arguments and
+timeout recovery. Existing framework-wrapper version rules below are unchanged.
+
 ## Register a model
 
 Both registration paths below create a new MLflow Registry version on every

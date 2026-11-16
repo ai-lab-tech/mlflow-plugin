@@ -14,7 +14,11 @@ dependencies = [
     "mlflow>=3.14,<4",
     "protobuf>=3.20.3",
     "packaging>=24.2",
+    "sqlalchemy>=2,<3",
 ]
+
+[project.optional-dependencies]
+serving = ["tritonclient[grpc]>=2.55,<3", "psycopg2-binary>=2.9,<3"]
 
 [project.urls]
 Homepage = "https://github.com/ai-lab-tech/mlflow-plugin"

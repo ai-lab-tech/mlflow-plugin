@@ -114,6 +114,51 @@ jobs:
           mlflow deployments help -t triton-control
           python scripts/test_packages.py --package control
 
+  derived-serving:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        mlflow: ${{ fromJSON(needs.build.outputs.mlflow_versions) }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: serving_test
+          POSTGRES_PASSWORD: serving_test
+          POSTGRES_DB: serving_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U serving_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - name: Install core and prepared-serving dependencies
+        env:
+          MLFLOW_VERSION: ${{ matrix.mlflow }}
+        run: |
+          if [ "$MLFLOW_VERSION" = latest ]; then
+            python -m pip install dist/core/*.whl "mlflow>=3.14,<4" "tritonclient[grpc]" psycopg2-binary jsonschema
+          else
+            python -m pip install dist/core/*.whl "mlflow==$MLFLOW_VERSION" "tritonclient[grpc]" psycopg2-binary jsonschema
+          fi
+          python -m pip check
+      - name: Verify publication receipts and concurrency with PostgreSQL
+        env:
+          MLFLOW_DISABLE_AGENT_HINT: "1"
+          SERVING_TEST_DATABASE_URL: postgresql+psycopg2://serving_test:serving_test@localhost:5432/serving_test
+        run: python -m unittest discover -s tests -p test_derived_serving.py -v
+
   versioning-smoke:
     needs: build
     runs-on: ubuntu-latest
@@ -243,7 +288,7 @@ jobs:
           MLFLOW_VERSION: ${{ matrix.mlflow }}
         run: |
           python -m pip install "torch==2.9.0" --index-url https://download.pytorch.org/whl/cpu
-          python -m pip install "transformers==4.57.1" "tritonclient[grpc]"
+          python -m pip install "transformers==4.57.1" "tritonclient[grpc]" jsonschema
           if [ "$MLFLOW_VERSION" = latest ]; then
             python -m pip install dist/core/*.whl "mlflow>=3.14,<4"
           else
@@ -259,7 +304,7 @@ jobs:
 
   publish-core:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [build, test, versioning-smoke, core-server-smoke, framework-tests, public-data]
+    needs: [build, test, derived-serving, versioning-smoke, core-server-smoke, framework-tests, public-data]
     runs-on: ubuntu-latest
     environment: pypi-core
     permissions:
