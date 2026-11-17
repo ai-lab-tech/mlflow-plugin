@@ -11,7 +11,10 @@ class CorePackageTests(unittest.TestCase):
             any("mlflow-triton-control" in item.lower() for item in core.requires or [])
         )
         self.assertFalse(
-            any(item.lower().startswith("tritonclient") for item in core.requires or [])
+            any(
+                item.lower().startswith("tritonclient") and "extra ==" not in item
+                for item in core.requires or []
+            )
         )
         self.assertFalse(
             any(ep.group == "mlflow.deployments" for ep in core.entry_points)

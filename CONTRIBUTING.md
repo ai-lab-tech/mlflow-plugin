@@ -39,6 +39,10 @@ tests core alone, then tests the optional integration. It creates a temporary
 virtual environment and downloads dependencies. Set `TMPDIR` and `PIP_CACHE_DIR`
 to existing directories on a suitable disk if necessary.
 
+Prepared-serving tests additionally use `pip install -e "packages/mlflow-triton[serving]" jsonschema`.
+Set `SERVING_TEST_DATABASE_URL` to a disposable `postgresql+psycopg2://...` database
+to exercise durable receipt and concurrency checks. See the [prepared-serving guide](packages/mlflow-triton/SERVING.md).
+
 Unit tests do not deploy services. Real CPU/GPU serving tests are explicit runs of
 [the example runner](examples/README.md); configure `--output-root` for all results.
 Report local tests and actual Triton checks separately, including skipped tests.
