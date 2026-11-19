@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-dependencies = ["mlflow-triton==0.4.3", "httpx>=0.27,<1"]
+dependencies = ["mlflow-triton==0.4.3", "httpx>=0.27,<1", "jsonschema>=4.23,<5"]
 
 [project.urls]
 Homepage = "https://github.com/ai-lab-tech/mlflow-plugin"
@@ -24,3 +24,6 @@ include = ["mlflow_triton_control*"]
 
 [project.entry-points."mlflow.deployments"]
 triton-control = "mlflow_triton_control.deployment_client"
+
+[tool.setuptools.package-data]
+mlflow_triton_control = ["control-lineage.schema.json"]

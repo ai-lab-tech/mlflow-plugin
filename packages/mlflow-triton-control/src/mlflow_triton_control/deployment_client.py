@@ -13,7 +13,7 @@ from mlflow.deployments import BaseDeploymentClient
 from mlflow.exceptions import MlflowException
 
 from ._deployment_access import access_payload
-from ._model_uri import resolve_deployment_artifacts
+from ._model_uri import export_lineage, resolve_deployment_artifacts
 
 _NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 _MODEL = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
@@ -82,7 +82,13 @@ class TritonControlDeploymentClient(BaseDeploymentClient):
                 base_url=self._base_url, timeout=10.0, follow_redirects=False
             ) as client:
                 response = client.request(
-                    method, path, headers={"Authorization": f"Bearer {token}"}, **kwargs
+                    method,
+                    path,
+                    headers={
+                        **kwargs.pop("headers", {}),
+                        "Authorization": f"Bearer {token}",
+                    },
+                    **kwargs,
                 )
             response.raise_for_status()
             return response.json()
@@ -151,7 +157,13 @@ class TritonControlDeploymentClient(BaseDeploymentClient):
             raise MlflowException("wait_timeout_seconds must be a positive number")
         exposure = access_payload(config, self._request)
         profile_id = self._resolve_s3_profile(config)
-        artifacts = resolve_deployment_artifacts(model_uri)
+        artifacts = (
+            resolve_deployment_artifacts(
+                model_uri, tracking_installation_id=config["tracking_installation_id"]
+            )
+            if config.get("tracking_installation_id")
+            else resolve_deployment_artifacts(model_uri)
+        )
         repository_uri = artifacts.repository_uri
         uri = urlsplit(repository_uri)
         parts = uri.path.strip("/").split("/")
@@ -177,6 +189,8 @@ class TritonControlDeploymentClient(BaseDeploymentClient):
             "image": image,
             "model_control_mode": "explicit",
         }
+        if getattr(artifacts, "lineage", None) is not None:
+            payload["lineage"] = artifacts.lineage
         payload.update(exposure)
         if artifacts.requirements_txt is not None:
             payload["requirements_txt"] = artifacts.requirements_txt
@@ -192,6 +206,95 @@ class TritonControlDeploymentClient(BaseDeploymentClient):
                     f"{current.get('status_detail', current['status'])}"
                 )
             time.sleep(min(3.0, max(0.0, deadline - time.monotonic())))
+
+    def export_lineage(self, model_uri, *, tracking_installation_id=None):
+        """Export portable identity, without deploying or granting approval."""
+        return export_lineage(
+            model_uri, tracking_installation_id=tracking_installation_id
+        )
+
+    def export_deployment_lineage(self, name):
+        """Read persisted provenance through the owner-authorized deployment API."""
+        lineage = self.get_deployment(name).get("lineage")
+        if lineage is None:
+            raise MlflowException(
+                "This older deployment has no recorded lineage; origin cannot be inferred from S3"
+            )
+        return lineage
+
+    def prepare_handoff(
+        self,
+        model_uri,
+        *,
+        s3_profile_name,
+        revision,
+        title,
+        tracking_installation_id=None,
+        dataset=None,
+        baseline=None,
+        expected_behavior=None,
+        acceptance_criteria=None,
+        previous_handoff_id=None,
+    ):
+        """Resolve once and retain this JSON request for retries, even if aliases move."""
+        artifacts = resolve_deployment_artifacts(
+            model_uri,
+            tracking_installation_id=tracking_installation_id,
+            require_lineage=True,
+        )
+        profile_id = self._resolve_s3_profile({"s3_profile_name": s3_profile_name})
+        profiles = self._request("GET", "/api/s3-profiles")
+        profile = next((p for p in profiles if p["id"] == profile_id), None)
+        location = urlsplit(artifacts.repository_uri)
+        # Capture the repository root, retaining model-name/config.pbtxt layout.
+        repository = location.path.strip("/").rsplit("/", 1)[0]
+        prefix = (profile.get("prefix") or "").strip("/") if profile else ""
+        if (
+            profile is None
+            or location.netloc != profile["bucket"]
+            or prefix
+            and not repository.startswith(prefix + "/")
+        ):
+            raise MlflowException("Model repository is outside the selected S3 profile")
+        relative = repository[len(prefix) + 1 :] if prefix else repository
+        if not relative:
+            raise MlflowException(
+                "Select a profile containing the repository as a child folder"
+            )
+        return {
+            "schema_version": 1,
+            "origin": artifacts.lineage["origin"],
+            "revision": revision,
+            "title": title,
+            "previous_handoff_id": previous_handoff_id,
+            "source": {
+                "kind": "s3_repository",
+                "profile_id": profile_id,
+                "path": relative,
+            },
+            "lineage": artifacts.lineage,
+            "dataset": dataset,
+            "baseline": baseline,
+            "expected_behavior": expected_behavior,
+            "acceptance_criteria": acceptance_criteria,
+        }
+
+    def submit_ready(self, prepared_handoff, *, idempotency_key):
+        """Explicitly enqueue preparation; log_model never calls this method."""
+        if (
+            not isinstance(idempotency_key, str)
+            or not 1 <= len(idempotency_key) <= 128
+            or idempotency_key != idempotency_key.strip()
+        ):
+            raise MlflowException(
+                "A stable Idempotency-Key of 1 to 128 characters is required"
+            )
+        return self._request(
+            "POST",
+            "/api/preparation/handoff-captures",
+            json=prepared_handoff,
+            headers={"Idempotency-Key": idempotency_key},
+        )
 
     def get_deployment(self, name):
         deployment = self._request(

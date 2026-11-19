@@ -109,7 +109,7 @@ jobs:
         env:
           MLFLOW_DISABLE_AGENT_HINT: "1"
         run: |
-          python -m pip install dist/control/*.whl
+          python -m pip install dist/control/*.whl "tritonclient[grpc]>=2.55,<3"
           python -m pip check
           mlflow deployments help -t triton-control
           python scripts/test_packages.py --package control
