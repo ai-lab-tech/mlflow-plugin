@@ -131,7 +131,7 @@ The requested snapshot's version-local requirements are read from the shared
 repository. A configuration change starts a new repository at `1/`.
 
 
-## Explicit ready submission and portable lineage (S05-D)
+## Explicit ready submission and portable lineage
 
 Logging remains independent of Control: `log_model` never creates a handoff,
 deployment, or production approval. After logging, an interactive member/admin

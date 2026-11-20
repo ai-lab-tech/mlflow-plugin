@@ -101,7 +101,7 @@ ID. Download `info.model_uri` with MLflow, then read its `lineage.json`; appendi
 `/lineage.json` directly to a logged-model URI is not portable across MLflow
 versions.
 
-The manifest includes the S05-A `ServingCandidateV1` envelope and complete input
+The manifest includes the `ServingCandidateV1` envelope and complete input
 and output inventories. Canonical JSON uses UTF-8, sorted keys, compact separators
 and explicit defaults/nulls; file entries sort by UTF-8 path bytes. The output
 inventory covers only the prepared repository. `MLmodel`, lineage and receipts
@@ -179,5 +179,3 @@ Local verification on 2026-11-16: all 18 publication tests passed with PostgreSQ
 (nine optional framework skips); the isolated 3.14.0 core suite passed 182 tests
 (with the same skips). Ruff lint/format, release consistency, core wheel/sdist
 builds and strict distribution metadata checks passed.
-
-Implementation story: [S05-C / #27](https://github.com/ai-lab-tech/triton-control-concepts/issues/27).
