@@ -179,7 +179,11 @@ exports the portable references through MLflow artifact access. Export also work
 with local artifacts and the managed artifact proxy; S3 is only required for
 Control capture/deployment. Derived models retain the exact logged-model origin,
 source training reference, candidate, conversion run, predecessor and the original
-`lineage.json` digest. Manifest and candidate digests are checked before use.
+`lineage.json` digest. Manifest and candidate digests are checked before use. Inventory entries must
+have unique safe paths, nonnegative integer sizes and valid digests. Publication
+and output-inventory declarations must agree with the manifest, and conversion
+attempts must identify the declared run in the same tracking installation.
+A candidate cannot name itself as its predecessor.
 The compact document is bounded to 48 KiB and references larger inventories by
 digest. These references are producer provenance, not independent validation or
 release approval. Unknown approval fields are rejected by the shared contract.

@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 import jsonschema
 import mlflow
 from mlflow.exceptions import MlflowException
-from mlflow_triton._serving_artifacts import canonical, digest
+from mlflow_triton._serving_artifacts import canonical, digest, safe_path
 from mlflow_triton._serving_sources import validate_uri
 
 MAX_LINEAGE_BYTES = 16 * 1024 * 1024
@@ -72,6 +72,8 @@ def validate(value):
                 if previous
                 else None
             )
+            if expected == candidate["origin"]:
+                raise ValueError("Candidate cannot be its own predecessor")
             if expected != candidate.get("previous_serving_candidate"):
                 raise ValueError("Predecessor references disagree")
             current = candidate["derived_from_snapshot"]["inventory"]
@@ -83,7 +85,12 @@ def validate(value):
                 seen.add(identity)
                 current = attempt["output_inventory"]
             if current != candidate["output_inventory"] or not any(
-                a["origin"]["record_id"] == value.get("conversion_run_id")
+                a["origin"]
+                == {
+                    "installation_id": origin["installation_id"],
+                    "record_id": value.get("conversion_run_id"),
+                }
+                and a["operation"] == "conversion"
                 for a in candidate["attempts"]
             ):
                 raise ValueError("Conversion run or output inventory disagrees")
@@ -104,10 +111,49 @@ def validate(value):
     return value
 
 
+def _inventory_digests(inventories):
+    """Validate inventory contents before treating their hashes as provenance."""
+    if not isinstance(inventories, list):
+        raise ValueError("Expected an inventory list")
+    checksums = set()
+    for inventory in inventories:
+        if (
+            not isinstance(inventory, dict)
+            or set(inventory) != {"schema_version", "files"}
+            or type(inventory["schema_version"]) is not int
+            or inventory["schema_version"] != 1
+            or not isinstance(inventory["files"], list)
+        ):
+            raise ValueError("Invalid version-one inventory")
+        paths = set()
+        for entry in inventory["files"]:
+            if (
+                not isinstance(entry, dict)
+                or set(entry) != {"path", "size", "digest"}
+                or not isinstance(entry["path"], str)
+                or type(entry["size"]) is not int
+                or entry["size"] < 0
+                or not isinstance(entry["digest"], str)
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", entry["digest"])
+            ):
+                raise ValueError("Invalid inventory file entry")
+            path = safe_path(entry["path"])
+            if path in paths:
+                raise ValueError("Duplicate inventory path")
+            paths.add(path)
+        checksums.add(digest(inventory))
+    return checksums
+
+
 def read(artifact_uri, metadata, model_uri, installation=None, *, required=False):
     declaration = (getattr(metadata, "metadata", None) or {}).get("triton_lineage")
     flavor = metadata.flavors.get("triton", {})
-    if not declaration and not flavor.get("lineage") and not required:
+    if (
+        not declaration
+        and not flavor.get("lineage")
+        and not required
+        and installation is None
+    ):
         return None  # Existing deployment clients retain their wire contract.
     model_id = getattr(metadata, "model_id", None)
     exact = (
@@ -164,7 +210,9 @@ def read(artifact_uri, metadata, model_uri, installation=None, *, required=False
         try:
             document = json.loads(content)
             if (
-                document.get("schema_version") != 1
+                not isinstance(document, dict)
+                or type(document.get("schema_version")) is not int
+                or document.get("schema_version") != 1
                 or declaration.get("schema_version") != 1
             ):
                 raise ValueError("Unsupported lineage version")
@@ -173,7 +221,17 @@ def read(artifact_uri, metadata, model_uri, installation=None, *, required=False
             ) != declaration.get("candidate_digest"):
                 raise ValueError("Lineage digest mismatch")
             candidate = document["candidate"]
-            inventories = {digest(item): item for item in document["inventories"]}
+            inventories = _inventory_digests(document["inventories"])
+            if (
+                declaration.get("publication_operation_id")
+                != candidate["origin"]["record_id"]
+            ):
+                raise ValueError("Publication identity differs from logged lineage")
+            if (
+                flavor.get("inventory_digest") is not None
+                and flavor["inventory_digest"] != candidate["output_inventory"]
+            ):
+                raise ValueError("Flavor inventory differs from logged lineage")
             if (
                 candidate["output_inventory"] not in inventories
                 or candidate["derived_from_snapshot"]["inventory"] not in inventories

@@ -36,7 +36,7 @@ class ControlLineageTests(unittest.TestCase):
         self.manifest.write_text(json.dumps(FIXTURE["manifest"]))
         self.metadata = SimpleNamespace(
             model_id="m-derived",
-            metadata={"triton_lineage": FIXTURE["declaration"]},
+            metadata={"triton_lineage": copy.deepcopy(FIXTURE["declaration"])},
             flavors={
                 "triton": {"data": "model_repository/iris", "lineage": "lineage.json"}
             },
@@ -85,31 +85,55 @@ class ControlLineageTests(unittest.TestCase):
                     artifact_uri=location + "/lineage.json", dst_path=unittest.mock.ANY
                 )
 
-    def test_tampered_manifest_and_conflicting_installation_fail_closed(self):
+    def test_conflicting_installation_fails_closed(self):
+        # Arrange
         with patch.object(_model_uri, "_artifact_uri", return_value="s3://bucket/root"):
+            # Act / Assert
             with self.assertRaises(MlflowException):
                 self.client.export_lineage(
                     "models:/m-derived", tracking_installation_id="other"
                 )
-            self.manifest.write_text("{}")
+
+    def test_tampered_manifest_fails_closed(self):
+        # Arrange
+        self.manifest.write_text("{}")
+        with patch.object(_model_uri, "_artifact_uri", return_value="s3://bucket/root"):
+            # Act / Assert
             with self.assertRaises(MlflowException):
                 self.client.export_lineage("models:/m-derived")
 
-    def test_legacy_export_requires_explicit_installation_and_invents_no_lineage(self):
+    def test_legacy_export_requires_explicit_installation(self):
+        # Arrange
         self.metadata.metadata = {}
         self.metadata.flavors["triton"].pop("lineage")
         with patch.object(_model_uri, "_artifact_uri", return_value="s3://bucket/root"):
+            # Act / Assert
             with self.assertRaises(MlflowException):
                 self.client.export_lineage("models:/m-derived")
+
+    def test_legacy_export_invents_no_derived_lineage(self):
+        # Arrange
+        self.metadata.metadata = {}
+        self.metadata.flavors["triton"].pop("lineage")
+        with patch.object(_model_uri, "_artifact_uri", return_value="s3://bucket/root"):
+            # Act
             result = self.client.export_lineage(
                 "models:/m-derived", tracking_installation_id="legacy-lab"
             )
-            self.assertEqual(
-                result["origin"],
-                {"installation_id": "legacy-lab", "record_id": "models:/m-derived"},
-            )
-            self.assertNotIn("candidate", result)
-            self.download.assert_not_called()
+
+        # Assert
+        self.assertEqual(
+            result,
+            {
+                "schema_version": 1,
+                "provider": "mlflow",
+                "origin": {
+                    "installation_id": "legacy-lab",
+                    "record_id": "models:/m-derived",
+                },
+            },
+        )
+        self.download.assert_not_called()
 
     def test_prepare_is_explicit_and_retries_do_not_resolve_alias_again(self):
         with patch.object(
@@ -148,12 +172,16 @@ class ControlLineageTests(unittest.TestCase):
                 self.assertEqual(prepared, frozen)
             resolve.assert_called_once()
 
-    def test_ready_authentication_and_authorization_errors_are_not_bypassed(self):
+    def test_ready_submission_requires_credentials(self):
+        # Arrange / Act / Assert
         with (
             patch.dict(os.environ, {"TRITON_CONTROL_TOKEN": ""}),
             self.assertRaises(MlflowException),
         ):
             self.client.submit_ready({}, idempotency_key="attempt")
+
+    def test_ready_submission_forwards_credentials_and_surfaces_denial(self):
+        # Arrange
         response = httpx.Response(
             403,
             json={"detail": "Interactive credentials required"},
@@ -161,6 +189,7 @@ class ControlLineageTests(unittest.TestCase):
         )
         with patch("httpx.Client") as client:
             client.return_value.__enter__.return_value.request.return_value = response
+            # Act / Assert
             with self.assertRaisesRegex(MlflowException, "403"):
                 self.client.submit_ready({}, idempotency_key="attempt")
             headers = (
@@ -175,7 +204,8 @@ class ControlLineageTests(unittest.TestCase):
         with self.assertRaises(MlflowException):
             _lineage.validate({**FIXTURE["lineage"], "production_approval": True})
 
-    def test_deployment_carries_and_exports_lineage(self):
+    def test_deployment_carries_lineage(self):
+        # Arrange
         with (
             patch.object(
                 _model_uri, "_artifact_uri", return_value="s3://models/allowed/model"
@@ -187,19 +217,180 @@ class ControlLineageTests(unittest.TestCase):
                 {"instance_id": 1},
                 {"status": "ready", "lineage": FIXTURE["lineage"]},
             ]
+            # Act
             result = self.client.create_deployment(
                 "iris",
                 "models:/m-derived",
                 config={"image": "triton", "s3_profile_name": "Lab"},
             )
+            # Assert
             self.assertEqual(
                 request.call_args_list[1].kwargs["json"]["lineage"], FIXTURE["lineage"]
             )
             self.assertEqual(result["lineage"], FIXTURE["lineage"])
-            request.side_effect = [{"lineage": result["lineage"]}]
-            self.assertEqual(
-                self.client.export_deployment_lineage("iris"), FIXTURE["lineage"]
+
+    def test_export_deployment_uses_recorded_lineage(self):
+        # Arrange
+        with patch.object(
+            self.client, "_request", return_value={"lineage": FIXTURE["lineage"]}
+        ) as request:
+            # Act
+            result = self.client.export_deployment_lineage("iris")
+
+        # Assert
+        self.assertEqual(result, FIXTURE["lineage"])
+        request.assert_called_once_with("GET", "/api/deployments/mlflow/iris")
+        self.download.assert_not_called()
+
+    def test_export_legacy_deployment_does_not_invent_origin(self):
+        # Arrange
+        with patch.object(self.client, "_request", return_value={"status": "ready"}):
+            # Act / Assert
+            with self.assertRaisesRegex(MlflowException, "no recorded lineage"):
+                self.client.export_deployment_lineage("iris")
+        self.download.assert_not_called()
+
+    def test_legacy_deployment_explicit_installation_preserves_origin(self):
+        # Arrange
+        self.metadata.metadata = {}
+        self.metadata.flavors["triton"].pop("lineage")
+        with (
+            patch.object(
+                _model_uri, "_artifact_uri", return_value="s3://models/root/model"
+            ),
+            patch.object(self.client, "_request") as request,
+        ):
+            request.side_effect = [
+                {"id": 1, "name": "Lab"},
+                {"instance_id": 1},
+                {"status": "ready"},
+            ]
+
+            # Act
+            self.client.create_deployment(
+                "iris",
+                "models:/m-derived",
+                config={
+                    "image": "triton",
+                    "s3_profile_name": "Lab",
+                    "tracking_installation_id": "legacy-lab",
+                },
             )
+
+        # Assert
+        self.assertEqual(
+            request.call_args_list[1].kwargs["json"].get("lineage"),
+            {
+                "schema_version": 1,
+                "provider": "mlflow",
+                "origin": {
+                    "installation_id": "legacy-lab",
+                    "record_id": "models:/m-derived",
+                },
+            },
+        )
+        self.download.assert_not_called()
+
+    def test_conversion_requires_matching_installation_and_operation(self):
+        for field, value in (
+            ("installation_id", "another-lab"),
+            ("operation", "validation"),
+        ):
+            with self.subTest(field=field):
+                # Arrange
+                lineage = copy.deepcopy(FIXTURE["lineage"])
+                attempt = lineage["candidate"]["attempts"][0]
+                (attempt["origin"] if field == "installation_id" else attempt)[
+                    field
+                ] = value
+
+                # Act / Assert
+                with self.assertRaises(MlflowException):
+                    _lineage.validate(lineage)
+
+    def test_candidate_cannot_be_its_own_predecessor(self):
+        # Arrange
+        lineage = copy.deepcopy(FIXTURE["lineage"])
+        lineage["candidate"]["previous_serving_candidate"] = lineage["candidate"][
+            "origin"
+        ]
+        lineage["previous_serving_model"]["candidate_origin"] = lineage["candidate"][
+            "origin"
+        ]
+
+        # Act / Assert
+        with self.assertRaises(MlflowException):
+            _lineage.validate(lineage)
+
+    def test_manifest_publication_identity_must_match_declaration(self):
+        # Arrange
+        self.metadata.metadata["triton_lineage"]["publication_operation_id"] = (
+            "other-publication"
+        )
+        with patch.object(
+            _model_uri, "_artifact_uri", return_value="s3://bucket/model"
+        ):
+            # Act / Assert
+            with self.assertRaises(MlflowException):
+                self.client.export_lineage("models:/m-derived")
+
+    def test_manifest_inventory_must_match_flavor(self):
+        # Arrange
+        self.metadata.flavors["triton"]["inventory_digest"] = "sha256:" + "0" * 64
+        with patch.object(
+            _model_uri, "_artifact_uri", return_value="s3://bucket/model"
+        ):
+            # Act / Assert
+            with self.assertRaises(MlflowException):
+                self.client.export_lineage("models:/m-derived")
+
+    def test_rehashed_invalid_inventory_is_not_accepted_as_valid_lineage(self):
+        for mutation in (
+            "unsafe-path",
+            "duplicate-path",
+            "negative-size",
+            "boolean-size",
+            "invalid-digest",
+        ):
+            with self.subTest(mutation=mutation):
+                # Arrange
+                document = copy.deepcopy(FIXTURE["manifest"])
+                inventory = document["inventories"][-1]
+                entry = inventory["files"][0]
+                if mutation == "unsafe-path":
+                    entry["path"] = "../outside"
+                elif mutation == "duplicate-path":
+                    inventory["files"].append(copy.deepcopy(entry))
+                elif mutation == "negative-size":
+                    entry["size"] = -1
+                elif mutation == "boolean-size":
+                    entry["size"] = True
+                else:
+                    entry["digest"] = "not-a-digest"
+                checksum = _lineage.digest(inventory)
+                document["candidate"]["output_inventory"] = checksum
+                document["candidate"]["attempts"][-1]["output_inventory"] = checksum
+                self.manifest.write_text(json.dumps(document))
+                self.metadata.metadata["triton_lineage"].update(
+                    digest=_lineage.digest(document),
+                    candidate_digest=_lineage.digest(document["candidate"]),
+                )
+                with patch.object(
+                    _model_uri, "_artifact_uri", return_value="s3://bucket/model"
+                ):
+                    # Act / Assert
+                    with self.assertRaises(MlflowException):
+                        self.client.export_lineage("models:/m-derived")
+
+    def test_non_object_manifest_raises_adapter_error(self):
+        # Arrange
+        self.manifest.write_text("[]")
+        with patch.object(
+            _model_uri, "_artifact_uri", return_value="s3://bucket/model"
+        ):
+            # Act / Assert
+            with self.assertRaises(MlflowException):
+                self.client.export_lineage("models:/m-derived")
 
 
 class PublishedModelLineageTests(unittest.TestCase):
