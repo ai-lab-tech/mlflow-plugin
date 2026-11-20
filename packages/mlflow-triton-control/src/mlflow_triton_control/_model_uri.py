@@ -11,14 +11,18 @@ from mlflow.models import get_model_info
 from mlflow.store.artifact.models_artifact_repo import ModelsArtifactRepository
 from mlflow.store.artifact.runs_artifact_repo import RunsArtifactRepository
 from mlflow.tracking._tracking_service.utils import get_default_host_creds
+from mlflow.utils.file_utils import local_file_uri_to_path
 from mlflow.utils.rest_utils import http_request
 from mlflow_triton._versions import _repository_model_id
+
+from . import _lineage
 
 
 @dataclass(frozen=True)
 class DeploymentArtifacts:
     repository_uri: str
     requirements_txt: str | None = None
+    lineage: dict | None = None
 
 
 def _read_requirements(repository_artifact_uri):
@@ -66,9 +70,16 @@ def _read_version_requirements(repository_uri, flavor):
     return _read_requirements(repository_uri)
 
 
-def resolve_deployment_artifacts(model_uri):
+def resolve_deployment_artifacts(
+    model_uri, *, tracking_installation_id=None, require_lineage=False
+):
     """Resolve one model version and retrieve its generated serving requirements."""
-    return _resolve_model(model_uri, include_requirements=True)
+    return _resolve_model(
+        model_uri,
+        include_requirements=True,
+        installation=tracking_installation_id,
+        require_lineage=require_lineage,
+    )
 
 
 def _relative_path(path):
@@ -138,7 +149,9 @@ def resolve_model_uri(model_uri):
     return _resolve_model(model_uri, include_requirements=False).repository_uri
 
 
-def _resolve_model(model_uri, *, include_requirements):
+def _resolve_model(
+    model_uri, *, include_requirements, installation=None, require_lineage=False
+):
     if not isinstance(model_uri, str) or not model_uri:
         raise MlflowException("model_uri is required")
     scheme = urlsplit(model_uri).scheme
@@ -148,7 +161,11 @@ def _resolve_model(model_uri, *, include_requirements):
         )
     try:
         artifact_uri = _artifact_uri(model_uri)
-        metadata = get_model_info(artifact_uri)
+        metadata = get_model_info(
+            local_file_uri_to_path(artifact_uri)
+            if urlsplit(artifact_uri).scheme == "file"
+            else artifact_uri
+        )
         flavor = metadata.flavors.get("triton")
         if not isinstance(flavor, dict):
             raise MlflowException("The MLflow model has no triton flavor")
@@ -164,10 +181,17 @@ def _resolve_model(model_uri, *, include_requirements):
             raise MlflowException(
                 "Triton flavor model_name does not match its data path"
             )
+        lineage = _lineage.read(
+            artifact_uri, metadata, model_uri, installation, required=require_lineage
+        )
         owner = _repository_model_id(flavor)
         if owner is not None:
             artifact_uri = _artifact_uri(f"models:/{owner}")
-            canonical = get_model_info(artifact_uri).flavors.get("triton")
+            canonical = get_model_info(
+                local_file_uri_to_path(artifact_uri)
+                if urlsplit(artifact_uri).scheme == "file"
+                else artifact_uri
+            ).flavors.get("triton")
             if not isinstance(canonical, dict) or canonical.get("data") != data:
                 raise MlflowException(
                     "Shared Triton repository has incompatible metadata"
@@ -178,7 +202,7 @@ def _resolve_model(model_uri, *, include_requirements):
             if include_requirements
             else None
         )
-        return DeploymentArtifacts(root + "/" + data, requirements)
+        return DeploymentArtifacts(root + "/" + data, requirements, lineage)
     except MlflowException:
         raise
     except Exception as exc:
@@ -186,3 +210,22 @@ def _resolve_model(model_uri, *, include_requirements):
             "Could not resolve the MLflow model to S3. Check tracking/registry "
             "access, artifact storage and the triton flavor."
         ) from exc
+
+
+def export_lineage(model_uri, *, tracking_installation_id=None):
+    """Export references through MLflow artifact access, including local storage."""
+    if not isinstance(model_uri, str) or not model_uri.startswith(
+        ("models:/", "runs:/")
+    ):
+        raise MlflowException("An MLflow model reference is required")
+    artifact_uri = _artifact_uri(model_uri)
+    metadata = get_model_info(
+        local_file_uri_to_path(artifact_uri)
+        if urlsplit(artifact_uri).scheme == "file"
+        else artifact_uri
+    )
+    if "triton" not in metadata.flavors:
+        raise MlflowException("The MLflow model has no triton flavor")
+    return _lineage.read(
+        artifact_uri, metadata, model_uri, tracking_installation_id, required=True
+    )

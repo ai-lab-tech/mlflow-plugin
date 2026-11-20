@@ -24,6 +24,7 @@ def main():
     for path in sorted(tests.glob("test_*.py")):
         integration = path.name.startswith("test_deployment") or path.name in {
             "test_compatibility.py",
+            "test_control_lineage.py",
             "test_generated_requirements.py",
             "test_model_uri.py",
             "test_profile_selection.py",

@@ -129,3 +129,74 @@ a shared serving location. The deployment client follows the Triton flavor's
 repository containing `1/` and `2/`. Their native MLflow packages remain separate.
 The requested snapshot's version-local requirements are read from the shared
 repository. A configuration change starts a new repository at `1/`.
+
+
+## Explicit ready submission and portable lineage
+
+Logging remains independent of Control: `log_model` never creates a handoff,
+deployment, or production approval. After logging, an interactive member/admin
+can explicitly prepare and submit a handoff:
+
+```python
+import json
+from pathlib import Path
+from mlflow.deployments import get_deploy_client
+
+client = get_deploy_client("triton-control")
+prepared = client.prepare_handoff(
+    info.model_uri,
+    s3_profile_name="research-models",
+    revision="1",
+    title="Iris ready for engineering",
+    # Required for older wrapper models without a declared lineage manifest.
+    # For derived models this must match the declared tracking installation.
+    tracking_installation_id="research-lab",
+    expected_behavior="Predict the Iris species",
+    acceptance_criteria="Meet the agreed evaluation accuracy",
+)
+Path("handoff-request.json").write_text(json.dumps(prepared))
+operation = client.submit_ready(prepared, idempotency_key="iris-submission-1")
+print(operation["status_url"])
+```
+
+Persist the prepared request and the submission key before sending. Retry the
+same JSON and key after an uncertain HTTP result; do not prepare it again because
+a Registry alias may have changed. A new submission after cancellation needs a
+new key. Poll the returned operation URL using the same Control user credential;
+success contains `result.handoff_id`. Use the standard operation cancel/retry
+endpoints for an existing job. Capture continues outside the HTTP request.
+
+The repository must already reside in versioned S3 storage accessible through
+the chosen profile, beneath a child folder of its prefix. No model weights are
+uploaded by this adapter. `dataset` and `baseline`, when supplied, are ordinary
+Control S3 input objects (`profile_id`, profile-relative `path`, optionally
+`version_id`/`expected_digest`). Missing evaluation inputs remain visible blockers.
+Workflow/deployment tokens cannot submit handoffs; use an interactive user token.
+Production installations reject these development operations.
+
+`client.export_lineage(info.model_uri, tracking_installation_id="research-lab")`
+exports the portable references through MLflow artifact access. Export also works
+with local artifacts and the managed artifact proxy; S3 is only required for
+Control capture/deployment. Derived models retain the exact logged-model origin,
+source training reference, candidate, conversion run, predecessor and the original
+`lineage.json` digest. Manifest and candidate digests are checked before use. Inventory entries must
+have unique safe paths, nonnegative integer sizes and valid digests. Publication
+and output-inventory declarations must agree with the manifest, and conversion
+attempts must identify the declared run in the same tracking installation.
+A candidate cannot name itself as its predecessor.
+The compact document is bounded to 48 KiB and references larger inventories by
+digest. These references are producer provenance, not independent validation or
+release approval. Unknown approval fields are rejected by the shared contract.
+
+`create_deployment` automatically forwards declared derived lineage. For old
+wrapper models, set `config["tracking_installation_id"]` to opt into a portable
+legacy origin; no source/predecessor lineage is fabricated. Existing calls remain
+valid. `client.export_deployment_lineage(name)` reads the lineage persisted with
+the admitted deployment through the owner-authorized API. Older deployments with
+no recorded lineage report that absence rather than reconstructing identity from
+an S3 address. Storage relocation does not change exported model identity.
+
+Deploy the additive Control API update before using these new methods. The core
+`mlflow-triton` package has no Control API dependency. The optional adapter ships
+`control-lineage.schema.json`, matching Control's version-one contract and shared
+fixture. No production rollout mechanism is introduced.
